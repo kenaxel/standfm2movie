@@ -16,201 +16,63 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
-  const [cachedVideoUrl, setCachedVideoUrl] = useState<string>('')
   
-  // videoUrlが変更された時だけ新しいキャッシュバスター付きURLを生成
+  // シンプルな動画URL設定
   useEffect(() => {
     setIsLoading(true)
     setError(null)
     
-    // キャッシュバスターを追加
-    const timestamp = Date.now();
-    const randomStr = Math.random().toString(36).substring(2, 15);
-    const cacheBuster = `t=${timestamp}&cache=${randomStr}`;
+    console.log('VideoPlayer: 動画URL設定:', videoUrl)
     
-    // URLにキャッシュバスターを追加
-    const videoUrlWithCache = videoUrl.includes('?') 
-      ? `${videoUrl}&${cacheBuster}` 
-      : `${videoUrl}?${cacheBuster}`;
-    
-    console.log('VideoPlayer: 動画URL:', videoUrlWithCache);
-    setCachedVideoUrl(videoUrlWithCache)
-    
-    // 動画URLを直接設定（事前確認なし）
-    console.log('動画URL設定:', videoUrlWithCache)
-    
-    // 動画要素を強制的にリセット
+    // 動画要素に直接URLを設定
     if (videoRef.current) {
+      videoRef.current.src = videoUrl
       videoRef.current.load()
     }
-    
-    // 5秒後に強制的にエラー状態をクリア（デバッグ用）
-    const forceLoadTimer = setTimeout(() => {
-      if (isLoading && videoRef.current) {
-        console.log('強制的に動画読み込みを再試行')
-        videoRef.current.load()
-      }
-    }, 5000)
-    
-    return () => {
-      clearTimeout(forceLoadTimer)
-    }
-    
-    // 読み込みタイムアウトを設定
-    const loadingTimeout = setTimeout(() => {
-      if (isLoading) {
-        console.log('動画読み込みタイムアウト');
-        setError('動画の読み込みに時間がかかっています。ファイルが存在しない可能性があります。');
-        setIsLoading(false);
-      }
-    }, 10000); // 10秒後にタイムアウト
-    
-    // 既存のビデオ要素を完全にクリア
-    if (videoRef.current) {
-      try {
-        videoRef.current.pause();
-        videoRef.current.currentTime = 0;
-        videoRef.current.removeAttribute('src');
-        
-        // すべてのsource要素を削除
-        while (videoRef.current.firstChild) {
-          videoRef.current.removeChild(videoRef.current.firstChild);
-        }
-        
-        // ブラウザキャッシュをクリアするためのハック
-        videoRef.current.innerHTML = '';
-        videoRef.current.load();
-        
-        // メモリ解放を促進
-        if (videoRef.current.src) {
-          URL.revokeObjectURL(videoRef.current.src);
-        }
-        
-        // 明示的にブラウザにキャッシュをクリアするよう指示
-        const head = document.getElementsByTagName('head')[0];
-        const meta = document.createElement('meta');
-        meta.httpEquiv = 'Cache-Control';
-        meta.content = 'no-cache, no-store, must-revalidate';
-        head.appendChild(meta);
-        setTimeout(() => head.removeChild(meta), 100);
-      } catch (e) {
-        console.error('ビデオ要素のクリア中にエラー:', e);
-      }
-    }
-    
-    // 遅延実行して確実に処理
-    const timer = setTimeout(() => {
-      try {
-        if (videoRef.current) {
-          // video要素に直接srcを設定（source要素を使わない）
-          videoRef.current.src = videoUrlWithCache;
-          
-          // 明示的にブラウザに再読み込みを指示
-          videoRef.current.load();
-          
-          console.log('ビデオ要素を再構築しました:', videoUrlWithCache);
-          
-          // 読み込み後に再生を試みる
-          videoRef.current.oncanplay = () => {
-            try {
-              console.log('ビデオが再生可能になりました');
-              setIsLoading(false);
-              videoRef.current?.play().catch(e => console.log('自動再生できませんでした:', e));
-            } catch (e) {
-              console.log('再生エラー:', e);
-            }
-          };
-          
-          // エラーハンドリングを追加
-          videoRef.current.onerror = (e) => {
-            console.error('ビデオ読み込みエラー:', e);
-            setError('動画の読み込みに失敗しました。再読み込みしてください。');
-            setIsLoading(false);
-            
-            // エラーの詳細をログに出力
-            if (videoRef.current && videoRef.current.error) {
-              console.error('エラーコード:', videoRef.current.error.code);
-              console.error('エラーメッセージ:', videoRef.current.error.message);
-              
-              // 特定のエラーコードに対する処理
-              if (videoRef.current.error.code === 4) {
-                console.log('MEDIA_ERR_SRC_NOT_SUPPORTED: ソースがサポートされていません');
-                // 別の方法で動画を読み込む
-                const alternativeUrl = videoUrl.replace('/output/', '/api/video/direct/');
-                videoRef.current.src = alternativeUrl + `?${cacheBuster}`;
-                videoRef.current.load();
-              }
-            }
-          };
-          
-          // 読み込みタイムアウトを追加
-          videoRef.current.onloadedmetadata = () => {
-            console.log('動画のメタデータが読み込まれました');
-            setIsLoading(false);
-          };
-        }
-      } catch (e) {
-        console.error('ビデオ要素の更新中にエラー:', e);
-        setError('動画の設定中にエラーが発生しました');
-        setIsLoading(false);
-      }
-    }, 300);
-    
-    // 読み込み失敗時のバックアップタイマー
-    const backupTimer = setTimeout(() => {
-      if (isLoading) {
-        console.log('動画読み込みタイムアウト（内部）');
-        setIsLoading(false);
-      }
-    }, 5000); // 5秒後のタイムアウト
-    
-    return () => {
-      clearTimeout(backupTimer);
-      clearTimeout(loadingTimeout);
-      clearTimeout(timer);
-    };
-  }, [videoUrl]) // videoUrlが変わった時だけ実行
+  }, [videoUrl])
 
   const handleLoadStart = () => {
+    console.log('動画読み込み開始')
     setIsLoading(true)
     setError(null)
   }
 
   const handleCanPlay = () => {
-    console.log('動画の再生準備ができました');
-    setIsLoading(false);
+    console.log('動画再生準備完了')
+    setIsLoading(false)
+  }
+
+  const handleLoadedData = () => {
+    console.log('動画データ読み込み完了')
+    setIsLoading(false)
   }
 
   const handleError = (e: any) => {
-    console.error('動画読み込みエラー:', e);
-    setIsLoading(false);
+    console.error('動画読み込みエラー:', e)
+    setIsLoading(false)
     
-    // エラーの詳細をログに出力
     if (videoRef.current && videoRef.current.error) {
-      const errorCode = videoRef.current.error.code;
-      const errorMessage = videoRef.current.error.message;
-      console.error('ビデオエラーコード:', errorCode);
-      console.error('ビデオエラーメッセージ:', errorMessage);
+      const errorCode = videoRef.current.error.code
+      console.error('エラーコード:', errorCode)
       
-      // エラーコードに応じたメッセージを表示
       switch (errorCode) {
-        case 1: // MEDIA_ERR_ABORTED
-          setError('動画の読み込みが中断されました。');
-          break;
-        case 2: // MEDIA_ERR_NETWORK
-          setError('ネットワークエラーが発生しました。');
-          break;
-        case 3: // MEDIA_ERR_DECODE
-          setError('動画ファイルの形式に問題があります。');
-          break;
-        case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
-          setError('動画ファイルが見つからないか、サポートされていない形式です。');
-          break;
+        case 1:
+          setError('動画の読み込みが中断されました')
+          break
+        case 2:
+          setError('ネットワークエラーが発生しました')
+          break
+        case 3:
+          setError('動画ファイルの形式に問題があります')
+          break
+        case 4:
+          setError('動画ファイルが見つかりません')
+          break
         default:
-          setError('動画の読み込みに失敗しました。ファイルが存在しない可能性があります。');
+          setError('動画の読み込みに失敗しました')
       }
     } else {
-      setError('動画の読み込みに失敗しました。ファイルが存在しない可能性があります。');
+      setError('動画の読み込みに失敗しました')
     }
   }
 
@@ -221,6 +83,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
+  }
+
+  const handleRetry = () => {
+    setError(null)
+    setIsLoading(true)
+    
+    if (videoRef.current) {
+      // キャッシュバスターを追加して再試行
+      const timestamp = Date.now()
+      const urlWithCache = videoUrl.includes('?') 
+        ? `${videoUrl}&retry=${timestamp}` 
+        : `${videoUrl}?retry=${timestamp}`
+      
+      videoRef.current.src = urlWithCache
+      videoRef.current.load()
+    }
   }
 
   return (
@@ -249,25 +127,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </svg>
                 <p>{error}</p>
                 <button
-                  onClick={async () => {
-                    setError(null)
-                    setIsLoading(true)
-                    
-                    // 動画URLを再試行
-                    const timestamp = Date.now()
-                    const newUrl = videoUrl.split('?')[0] + `?retry=${timestamp}`
-                    setCachedVideoUrl(newUrl)
-                    
-                    // 動画要素を強制的に再読み込み
-                    if (videoRef.current) {
-                      // source要素を更新
-                      const sourceElement = videoRef.current.querySelector('source')
-                      if (sourceElement) {
-                        sourceElement.src = newUrl
-                      }
-                      videoRef.current.load()
-                    }
-                  }}
+                  onClick={handleRetry}
                   className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
                 >
                   再試行
@@ -279,28 +139,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               ref={videoRef}
               className="w-full aspect-video"
               controls
-              preload="auto"
+              preload="metadata"
               playsInline
-              crossOrigin="anonymous"
               onLoadStart={handleLoadStart}
               onCanPlay={handleCanPlay}
+              onLoadedData={handleLoadedData}
               onError={handleError}
-              onLoadedData={() => {
-                console.log('動画データが読み込まれました')
-                setIsLoading(false)
-              }}
-              onLoadedMetadata={() => {
-                console.log('動画メタデータが読み込まれました')
-                if (videoRef.current) {
-                  console.log('動画の長さ:', videoRef.current.duration, '秒')
-                }
-              }}
-              onStalled={() => console.log('動画の読み込みが停止しました')}
-              onSuspend={() => console.log('動画の読み込みが中断されました')}
-              onWaiting={() => console.log('動画がデータを待機中です')}
-              onAbort={() => console.log('動画の読み込みが中止されました')}
             >
-              <source src={cachedVideoUrl} type="video/mp4" />
               お使いのブラウザは動画の再生をサポートしていません。
             </video>
           )}
