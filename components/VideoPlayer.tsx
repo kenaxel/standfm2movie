@@ -23,70 +23,27 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setIsLoading(true)
     setError(null)
     
-    // 完全に新しいURLを生成してキャッシュを回避
+    // キャッシュバスターを追加
     const timestamp = Date.now();
     const randomStr = Math.random().toString(36).substring(2, 15);
-    const cacheBuster = `cache=${timestamp}-${randomStr}&nocache=true&t=${timestamp}&v=8`;
+    const cacheBuster = `t=${timestamp}&cache=${randomStr}`;
     
-    // URLを完全に新しい形式に変更
-    let videoUrlWithCache;
+    // URLにキャッシュバスターを追加
+    const videoUrlWithCache = videoUrl.includes('?') 
+      ? `${videoUrl}&${cacheBuster}` 
+      : `${videoUrl}?${cacheBuster}`;
     
-    // 動画URLを直接指定（キャッシュ回避のため完全に新しいパスを使用）
-    if (videoUrl.includes('/api/video/')) {
-      const parts = videoUrl.split('/');
-      const jobId = parts[parts.length - 2];
-      // 直接public/outputからファイルを提供
-      videoUrlWithCache = `/output/${jobId}.mp4?${cacheBuster}`;
-    } else if (videoUrl.includes('/output/')) {
-      // 既にoutputパスの場合はそのまま使用
-      videoUrlWithCache = videoUrl.includes('?') 
-        ? `${videoUrl}&${cacheBuster}` 
-        : `${videoUrl}?${cacheBuster}`;
-    } else {
-      // その他の場合は元のURLにキャッシュバスターを追加
-      videoUrlWithCache = videoUrl.includes('?') 
-        ? `${videoUrl}&${cacheBuster}` 
-        : `${videoUrl}?${cacheBuster}`;
-    }
-    
-    console.log('VideoPlayer: 新しい動画URL:', videoUrlWithCache);
+    console.log('VideoPlayer: 動画URL:', videoUrlWithCache);
     setCachedVideoUrl(videoUrlWithCache)
     
     // 読み込みタイムアウトを設定
     const loadingTimeout = setTimeout(() => {
       if (isLoading) {
-        console.log('動画読み込みタイムアウト - 再試行します');
-        setError('動画の読み込みに時間がかかっています。再試行中...');
-        
-        // 再試行のためにURLを再生成（完全に新しいパスを使用）
-        const retryTimestamp = Date.now();
-        const retryRandomStr = Math.random().toString(36).substring(2, 15);
-        const retryCacheBuster = `cache=${retryTimestamp}-${retryRandomStr}&nocache=true&t=${retryTimestamp}&retry=true&v=6`;
-        
-        // 直接public/outputからファイルを提供
-        let retryUrl;
-        if (videoUrl.includes('/api/video/')) {
-          const parts = videoUrl.split('/');
-          const jobId = parts[parts.length - 2];
-          retryUrl = `/output/${jobId}.mp4?${retryCacheBuster}`;
-        } else {
-          const urlParts = videoUrl.split('/');
-          const fileName = urlParts[urlParts.length - 1].split('?')[0];
-          retryUrl = `/output/${fileName}?${retryCacheBuster}`;
-        }
-        
-        console.log('再試行URL:', retryUrl);
-        setCachedVideoUrl(retryUrl);
-        
-        // 再試行後も読み込めない場合のバックアップタイマー
-        setTimeout(() => {
-          if (isLoading) {
-            setError('動画の読み込みに失敗しました。ページを再読み込みしてください。');
-            setIsLoading(false);
-          }
-        }, 10000);
+        console.log('動画読み込みタイムアウト');
+        setError('動画の読み込みに時間がかかっています。ファイルが存在しない可能性があります。');
+        setIsLoading(false);
       }
-    }, 8000); // 8秒後にタイムアウト（より早く）
+    }, 10000); // 10秒後にタイムアウト
     
     // 既存のビデオ要素を完全にクリア
     if (videoRef.current) {

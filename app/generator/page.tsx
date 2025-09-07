@@ -285,32 +285,15 @@ export default function GeneratorPage() {
         const allKeywords = extractMainKeywords(currentTranscript);
         console.log('抽出された主要キーワード:', allKeywords);
         
-        // 新しいジョブIDを生成
-        const jobId = `job-${Date.now()}-${Math.random().toString(36).substring(2)}`;
-        
-        console.log(`動画生成ジョブを開始: ${jobId}`);
-        
         // 動画生成リクエストを送信
         const videoResponse = await fetch('/api/generate-video', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            jobId,
             audioInput: audioInputForVideo,
             settings: videoSettings,
             transcript: transcriptSegments,
-            keywords: allKeywords,
-            contentType: detectContentType(currentTranscript),
-            cacheBreaker: uniqueCacheBreaker,
-            forceRefresh: true,
-            timestamp: Date.now(),
-            preventCache: Math.random().toString(36).substring(2),
-            // 追加のメタデータ
-            meta: {
-              clientTimestamp: Date.now(),
-              clientId: `client-${Math.random().toString(36).substring(2)}`,
-              sessionId: `session-${Math.random().toString(36).substring(2)}`
-            }
+            customAssets: []
           })
         })
         
@@ -380,47 +363,10 @@ export default function GeneratorPage() {
           throw new Error(videoResult.error)
         }
 
-        // 動画URLにタイムスタンプパラメータを追加してキャッシュを回避
-        const timestamp = Date.now()
-        const randomStr = Math.random().toString(36).substring(2, 15)
+        console.log('動画生成結果:', videoResult)
         
-        // 動画URLを設定（直接ファイルを提供）
-        const newVideoUrl = `/output/${jobId}.mp4?t=${timestamp}&cache=${randomStr}&nocache=true&v=8`;
-        
-        const resultWithTimestamp = {
-          ...videoResult.result,
-          videoUrl: newVideoUrl,
-          jobId: jobId
-        }
-        
-        console.log('新しい動画URL:', newVideoUrl)
-        
-        // 古い動画の状態をクリアしてから新しい動画を設定
-        setGeneratedVideo(null)
-        
-        // 少し待ってから新しい動画を設定（DOMの更新を確実にするため）
-        setTimeout(() => {
-          // 実際のファイルが存在するか確認
-          fetch(`/output/${jobId}.mp4`, { method: 'HEAD' })
-            .then(response => {
-              if (response.ok) {
-                console.log('動画ファイルが存在します:', response.status);
-                setGeneratedVideo(resultWithTimestamp);
-              } else {
-                console.error('動画ファイルが見つかりません:', response.status);
-                // 代替URLを試す
-                const fallbackUrl = `/api/video/${jobId}/output.mp4?t=${timestamp}&cache=${randomStr}&nocache=true&v=8`;
-                setGeneratedVideo({
-                  ...resultWithTimestamp,
-                  videoUrl: fallbackUrl
-                });
-              }
-            })
-            .catch(error => {
-              console.error('動画ファイル確認エラー:', error);
-              setError('動画ファイルの確認中にエラーが発生しました');
-            });
-        }, 1000)
+        // 結果を直接設定
+        setGeneratedVideo(videoResult.result)
       } else {
         // 記事生成（既存の文字起こし結果を使用）
         console.log('記事生成開始:', { transcript: currentTranscript.substring(0, 100) + '...', settings })

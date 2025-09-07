@@ -203,36 +203,39 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<strin
         console.error('OpenAI TTS failed, falling back to silent audio:', ttsError)
         
         // フォールバック：無音の音声ファイルを生成
-        const { spawn } = require('child_process')
-        
         return new Promise((resolve, reject) => {
           // テキストの長さに基づいて音声の長さを計算（1文字あたり0.1秒）
           const duration = Math.max(10, Math.min(300, audioInput.length * 0.1)) // 10秒〜300秒
-          const ffmpeg = spawn('ffmpeg', [
-            '-f', 'lavfi',
-            '-i', `sine=frequency=440:duration=${duration}`,
-            '-c:a', 'mp3',
-            '-ar', '44100',
-            '-ac', '2',
-            '-y',
-            audioPath
-          ])
           
-          ffmpeg.on('close', (code: number) => {
-            if (code === 0) {
+          ffmpeg()
+            .input(`sine=frequency=440:duration=${duration}`)
+            .inputOptions(['-f', 'lavfi'])
+            .audioCodec('mp3')
+            .audioFrequency(44100)
+            .audioChannels(2)
+            .output(audioPath)
+            .on('end', () => {
               console.log('Fallback synthesized audio created:', audioPath)
               resolve(audioPath)
-            } else {
-              console.error('Failed to create fallback synthesized audio')
+            })
+            .on('error', (err: Error) => {
+              console.error('FFmpeg error:', err)
               resolve(null)
-            }
-          })
-          
-          ffmpeg.on('error', (err: Error) => {
-            console.error('FFmpeg error:', err)
-            resolve(null)
-          })
+            })
+            .run()
         })
+      }
+    } else if (audioInput.type === 'tempFile' && audioInput.path) {
+      // 一時ファイルの場合
+      const sourcePath = path.join(process.cwd(), 'public', audioInput.path.replace('/api/audio/', 'audio/'))
+      if (fs.existsSync(sourcePath)) {
+        audioPath = path.join(tempDir, `audio_${Date.now()}.mp3`)
+        await fs.promises.copyFile(sourcePath, audioPath)
+        console.log('Temp audio file copied:', audioPath)
+        return audioPath
+      } else {
+        console.error('Temp audio file not found:', sourcePath)
+        return null
       }
     } else if (audioInput.type === 'file' && audioInput.data) {
       // Base64データから音声ファイルを保存
@@ -1303,131 +1306,57 @@ export async function POST(request: NextRequest) {
       description: 'テスト用の動画です'
     }
     
-    // 6. Remotionを使用した実際の動画生成
-    console.log('Remotion動画生成開始:', new Date().toISOString())
+    // 6. 実際の動画生成
+    console.log('動画生成開始:', new Date().toISOString())
     
     let result: VideoGenerationResult
     let outputPath: string
     let fileSize: number
     
-    // FFmpegを使用した基本的な動画生成
-  console.log('API endpoint called with:', { audioInput, settings })
-  console.log('Starting FFmpeg-based video generation')
-  
-  try {
-    // 一時ディレクトリの作成（より確実な方法）
-    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'video-generation-'))
-    console.log('Created temp directory:', tempDir)
+    // 出力ディレクトリを確保
+    const outputDir = path.join(process.cwd(), 'public', 'output')
+    if (!fs.existsSync(outputDir)) {
+      await fs.promises.mkdir(outputDir, { recursive: true })
+    }
     
-    // 出力ファイルパス（権限問題を避けるため、より安全なパス）
-    outputPath = path.join(tempDir, 'output.mp4')
+    // ジョブIDを生成
+    const jobId = `job-${Date.now()}-${Math.random().toString(36).substring(2)}`
+    outputPath = path.join(outputDir, `${jobId}.mp4`)
     console.log('Output path:', outputPath)
     
     // 音声ファイルを処理
     const audioPath = await processAudioFile(audioInput, tempDir)
     console.log('processAudioFile結果:', { audioPath, exists: audioPath ? fs.existsSync(audioPath) : false })
     
-    // 音声の文字起こしを実行（タイムスタンプ付き字幕のため）
+    // 文字起こし処理を改善
     let transcriptWithTimestamps: any[] = []
-    if (audioPath && fs.existsSync(audioPath)) {
+    
+    // 既存のtranscriptがある場合はそれを使用
+    if (processedTranscript && processedTranscript.length > 0) {
+      console.log('既存の文字起こしを使用:', processedTranscript.length, '個のセグメント')
+      transcriptWithTimestamps = processedTranscript
+    } else if (audioPath && fs.existsSync(audioPath)) {
       try {
         console.log('音声の文字起こしを開始...', audioPath)
         transcriptWithTimestamps = await transcribeAudioWithTimestamps(audioPath)
         console.log('文字起こし完了:', transcriptWithTimestamps.length, '個のセグメント')
       } catch (error) {
         console.error('文字起こしエラー:', error)
-        // エラーの場合は空の配列を使用
+        // フォールバック：デフォルトの字幕を作成
+        transcriptWithTimestamps = [{
+          text: 'Generated Video',
+          startTime: 0,
+          endTime: audioDuration
+        }]
       }
     } else {
-      console.log('音声ファイルが存在しないため文字起こしをスキップ:', { audioPath, audioInput: typeof audioInput })
-      console.log('audioInput詳細:', audioInput)
-      console.log('audioInput.source:', audioInput.source, 'typeof:', typeof audioInput.source)
-      
-      // 文字列入力の場合は、テキストを時間分割して字幕セグメントを作成
-       if (typeof audioInput.source === 'string' && audioInput.source.trim()) {
-         console.log('文字列入力による字幕生成開始')
-         const text = audioInput.source.trim()
-        // 日本語の場合は文字単位、英語の場合は単語単位で分割
-        const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text)
-        console.log('テキスト:', text, '日本語判定:', isJapanese, '文字コード確認:', text.split('').map(c => c.charCodeAt(0)))
-        
-        if (isJapanese) {
-          // 日本語の場合：句読点で分割し、長い場合は文字数で分割
-          console.log('日本語テキスト分割開始:', text)
-          const sentences = text.split(/[。！？]/).filter(s => s.trim())
-          console.log('句読点分割結果:', sentences)
-          const maxCharsPerSegment = 10 // より短く設定
-          
-          // 実際の音声の長さに基づいてセグメント時間を計算
-          const totalChars = text.length
-          const estimatedSegments = Math.ceil(totalChars / maxCharsPerSegment)
-          const segmentDuration = audioDuration / estimatedSegments // 実際の音声の長さを使用
-          
-          console.log('字幕分割計算:', {
-            totalChars,
-            estimatedSegments,
-            audioDuration,
-            segmentDuration
-          })
-          
-          let currentTime = 0
-          
-          if (sentences.length === 0 || (sentences.length === 1 && sentences[0] === text)) {
-            // 句読点がない場合は文字数で強制分割
-            console.log('句読点がないため文字数で分割')
-            for (let i = 0; i < text.length; i += maxCharsPerSegment) {
-              const chunk = text.slice(i, i + maxCharsPerSegment)
-              transcriptWithTimestamps.push({
-                text: chunk,
-                startTime: currentTime,
-                endTime: currentTime + segmentDuration
-              })
-              currentTime += segmentDuration
-            }
-          } else {
-            for (const sentence of sentences) {
-              if (sentence.length <= maxCharsPerSegment) {
-                transcriptWithTimestamps.push({
-                  text: sentence.trim(),
-                  startTime: currentTime,
-                  endTime: currentTime + segmentDuration
-                })
-                currentTime += segmentDuration
-              } else {
-                // 長い文は分割
-                for (let i = 0; i < sentence.length; i += maxCharsPerSegment) {
-                  const chunk = sentence.slice(i, i + maxCharsPerSegment)
-                  transcriptWithTimestamps.push({
-                    text: chunk,
-                    startTime: currentTime,
-                    endTime: currentTime + segmentDuration
-                  })
-                  currentTime += segmentDuration
-                }
-              }
-            }
-          }
-        } else {
-          // 英語の場合：単語単位で分割
-          const words = text.split(/\s+/)
-          const wordsPerSegment = 4
-          const segmentDuration = 2
-          
-          for (let i = 0; i < words.length; i += wordsPerSegment) {
-            const segmentWords = words.slice(i, i + wordsPerSegment)
-            const startTime = (i / wordsPerSegment) * segmentDuration
-            const endTime = startTime + segmentDuration
-            
-            transcriptWithTimestamps.push({
-              text: segmentWords.join(' '),
-              startTime: startTime,
-              endTime: endTime
-            })
-          }
-        }
-        
-        console.log('テキストから字幕セグメントを生成:', transcriptWithTimestamps.length, '個のセグメント')
-      }
+      // 音声ファイルがない場合のフォールバック
+      console.log('音声ファイルがないため、デフォルトの字幕を作成')
+      transcriptWithTimestamps = [{
+        text: 'Generated Video Content',
+        startTime: 0,
+        endTime: audioDuration
+      }]
     }
     
     // 音声を字幕として表示する動画生成
@@ -1442,38 +1371,32 @@ export async function POST(request: NextRequest) {
       audioDuration
     })
     
-    // ファイルサイズを取得
-    const stats = await fs.promises.stat(outputPath)
-    fileSize = stats.size
+    // 動画ファイルが生成されたか確認
+    if (fs.existsSync(outputPath)) {
+      const stats = await fs.promises.stat(outputPath)
+      fileSize = stats.size
+      console.log('Video file generated successfully:', outputPath, 'Size:', fileSize)
+    } else {
+      throw new Error('動画ファイルの生成に失敗しました')
+    }
     
     // 公開用パスを生成
-    const publicVideoPath = `/api/video/${path.basename(outputPath)}`
+    const publicVideoPath = `/output/${jobId}.mp4`
     
     result = {
       videoUrl: publicVideoPath,
       thumbnailUrl: videoAssets[0]?.url || 'https://via.placeholder.com/1280x720/0066cc/ffffff?text=Generated+Video',
       duration: audioDuration,
       format: settings.format,
-      size: fileSize
+      size: fileSize,
+      jobId: jobId
     }
     
     console.log('Video generation completed:', result)
     
   } catch (error) {
     console.error('Video generation error:', error)
-    
-    // エラーの場合はモックの結果を返す
-    outputPath = '/tmp/mock-video.mp4'
-    fileSize = 1024 * 1024 // 1MB
-    const publicVideoPath = `/api/video/mock-video.mp4`
-    
-    result = {
-      videoUrl: publicVideoPath,
-      thumbnailUrl: videoAssets[0]?.url || 'https://via.placeholder.com/1280x720/0066cc/ffffff?text=Generated+Video',
-      duration: audioDuration,
-      format: settings.format,
-      size: fileSize
-    }
+    throw error // エラーを再スローして適切にハンドリング
   }
     
     console.log('実際の動画生成完了:', {
@@ -1490,8 +1413,9 @@ export async function POST(request: NextRequest) {
       result,
       title: metadata.title,
       description: metadata.description,
-      scenesCount: 0,
-      assetsUsed: videoAssets.length
+      scenesCount: analysisResult.scenes.length,
+      assetsUsed: videoAssets.length,
+      jobId: result.jobId
     }, { status: 200 })
     
   } catch (error: any) {
