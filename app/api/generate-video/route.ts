@@ -835,18 +835,44 @@ async function generateSimpleWebMVideo({
       const sentences = text.split(/[。！？.!?]/).filter(s => s.trim())
       
       if (sentences.length > 0) {
-        const segmentDuration = audioDuration / sentences.length
-        subtitleSegments = sentences.map((sentence, index) => ({
-          text: sentence.trim(),
+        // 各文に適切な表示時間を設定（最低2秒、最大8秒）
+        const totalTextLength = sentences.reduce((sum, sentence) => sum + sentence.length, 0)
+        let currentTime = 0
+        
+        subtitleSegments = sentences.map((sentence, index) => {
+          const sentenceLength = sentence.trim().length
+          const proportion = sentenceLength / totalTextLength
+          const duration = Math.max(2, Math.min(8, audioDuration * proportion))
+          
+          const startTime = currentTime
+          const endTime = Math.min(currentTime + duration, audioDuration)
+          currentTime = endTime
+          
+          return {
+            text: sentence.trim(),
+            startTime,
+            endTime
+          }
+        })
+        
+        // 最後のセグメントが動画の長さに達していない場合は調整
+        if (subtitleSegments.length > 0 && subtitleSegments[subtitleSegments.length - 1].endTime < audioDuration) {
+          subtitleSegments[subtitleSegments.length - 1].endTime = audioDuration
+        }
+      } else {
+        // 文が分割できない場合は全体を一つのセグメントとして扱う
+        const maxLength = 30 // 一行の最大文字数
+        const chunks = []
+        for (let i = 0; i < text.length; i += maxLength) {
+          chunks.push(text.slice(i, i + maxLength))
+        }
+        
+        const segmentDuration = audioDuration / chunks.length
+        subtitleSegments = chunks.map((chunk, index) => ({
+          text: chunk.trim(),
           startTime: index * segmentDuration,
           endTime: (index + 1) * segmentDuration
         }))
-      } else {
-        subtitleSegments = [{
-          text: text.substring(0, 50) + '...',
-          startTime: 0,
-          endTime: audioDuration
-        }]
       }
     }
     
@@ -883,17 +909,14 @@ async function generateSimpleWebMVideo({
         currentTime >= segment.startTime && currentTime <= segment.endTime
       )
       
-      if (currentSubtitle) {
-        // 字幕を描画
-        ctx.fillStyle = 'white'
-        ctx.strokeStyle = 'black'
-        ctx.lineWidth = 4
-        ctx.font = 'bold 48px Arial'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
+      if (currentSubtitle && currentSubtitle.text.trim()) {
+        // 字幕背景を描画
+        const maxWidth = canvas.width - 100
+        const padding = 20
+        const lineHeight = 60
         
-        // テキストを複数行に分割
-        const maxWidth = canvas.width - 200
+        // テキストを適切に分割
+        ctx.font = 'bold 42px Arial'
         const words = currentSubtitle.text.split('')
         const lines = []
         let currentLine = ''
@@ -901,7 +924,7 @@ async function generateSimpleWebMVideo({
         for (const char of words) {
           const testLine = currentLine + char
           const metrics = ctx.measureText(testLine)
-          if (metrics.width > maxWidth && currentLine !== '') {
+          if (metrics.width > maxWidth - padding * 2 && currentLine !== '') {
             lines.push(currentLine)
             currentLine = char
           } else {
@@ -912,12 +935,23 @@ async function generateSimpleWebMVideo({
           lines.push(currentLine)
         }
         
-        // 各行を描画
-        const lineHeight = 60
-        const startY = canvas.height - (lines.length * lineHeight) - 100
+        // 背景の高さを計算
+        const backgroundHeight = lines.length * lineHeight + padding * 2
+        const backgroundY = canvas.height - backgroundHeight - 50
+        
+        // 字幕背景を描画
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)'
+        ctx.fillRect(50, backgroundY, canvas.width - 100, backgroundHeight)
+        
+        // 字幕テキストを描画
+        ctx.fillStyle = 'white'
+        ctx.strokeStyle = 'black'
+        ctx.lineWidth = 3
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
         
         lines.forEach((line, index) => {
-          const y = startY + (index * lineHeight)
+          const y = backgroundY + padding + (index + 0.5) * lineHeight
           ctx.strokeText(line, canvas.width / 2, y)
           ctx.fillText(line, canvas.width / 2, y)
         })
@@ -954,9 +988,15 @@ async function generateSimpleWebMVideo({
         console.log('音声を追加:', audioPath)
         ffmpegCommand
           .input(audioPath)
-          .outputOptions(['-map', '0:v', '-map', '1:a', '-shortest'])
+          .outputOptions([
+            '-map', '0:v:0',  // 最初の入力（フレーム画像）の動画ストリーム
+            '-map', '1:a:0',  // 二番目の入力（音声ファイル）の音声ストリーム
+            '-shortest'       // 短い方の長さに合わせる
+          ])
           .audioCodec('aac')
           .audioBitrate('128k')
+          .audioFrequency(44100)
+          .audioChannels(2)
       } else {
         console.log('音声なしで動画を生成')
         ffmpegCommand.outputOptions(['-t', audioDuration.toString()])
