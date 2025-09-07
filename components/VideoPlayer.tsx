@@ -34,19 +34,46 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     console.log('VideoPlayer: 新しいキャッシュバスター付きURL:', videoUrlWithCache);
     setCachedVideoUrl(videoUrlWithCache)
     
-    // 既存のビデオ要素をクリア
+    // 既存のビデオ要素を完全にクリア
     if (videoRef.current) {
       videoRef.current.pause();
       videoRef.current.removeAttribute('src');
+      
+      // すべてのsource要素を削除
+      while (videoRef.current.firstChild) {
+        videoRef.current.removeChild(videoRef.current.firstChild);
+      }
+      
       videoRef.current.load();
     }
     
-    // 少し遅延させてから新しいURLを設定
+    // 少し遅延させてから新しいURLを設定（より長い遅延）
     const timer = setTimeout(() => {
       if (videoRef.current) {
+        // 新しいsource要素を作成
+        const source = document.createElement('source');
+        source.src = videoUrlWithCache;
+        source.type = 'video/mp4';
+        
+        // 古いsource要素を削除
+        while (videoRef.current.firstChild) {
+          videoRef.current.removeChild(videoRef.current.firstChild);
+        }
+        
+        // 新しいsource要素を追加
+        videoRef.current.appendChild(source);
         videoRef.current.load();
+        
+        // 読み込み後に再生を試みる
+        videoRef.current.oncanplay = () => {
+          try {
+            videoRef.current?.play().catch(e => console.log('自動再生できませんでした:', e));
+          } catch (e) {
+            console.log('再生エラー:', e);
+          }
+        };
       }
-    }, 100);
+    }, 300);
     
     return () => {
       clearTimeout(timer);
@@ -108,12 +135,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               ref={videoRef}
               className="w-full aspect-video"
               controls
-              preload="metadata"
+              preload="auto"
+              playsInline
               onLoadStart={handleLoadStart}
               onCanPlay={handleCanPlay}
               onError={handleError}
             >
-              {cachedVideoUrl && <source src={cachedVideoUrl} type="video/mp4" />}
+              {/* source要素はJavaScriptで動的に追加 */}
               お使いのブラウザは動画の再生に対応していません。
             </video>
           )}
