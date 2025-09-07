@@ -898,25 +898,25 @@ async function generateSubtitleVideo({
         
         if (sentences.length === 0) {
           // 句読点がない場合は文字数で分割
-          const maxCharsPerSegment = 20;
+          const maxCharsPerSegment = 15;
           const segments = [];
           for (let i = 0; i < text.length; i += maxCharsPerSegment) {
             segments.push(text.slice(i, i + maxCharsPerSegment));
           }
           
-          const segmentDuration = audioDuration / segments.length;
+          const segmentDuration = Math.max(2, audioDuration / segments.length);
           segments.forEach((segment, index) => {
             const startTime = index * segmentDuration;
-            const endTime = Math.min((index + 1) * segmentDuration, audioDuration);
+            const endTime = Math.min(startTime + segmentDuration, audioDuration);
             srtContent += `${index + 1}\n${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n${segment.trim()}\n\n`;
           });
         } else {
           // 句読点で分割された文を使用
-          const segmentDuration = audioDuration / sentences.length;
+          const segmentDuration = Math.max(3, audioDuration / sentences.length);
           sentences.forEach((sentence: string, index: number) => {
             if (sentence.trim()) {
               const startTime = index * segmentDuration;
-              const endTime = Math.min((index + 1) * segmentDuration, audioDuration);
+              const endTime = Math.min(startTime + segmentDuration, audioDuration);
               srtContent += `${index + 1}\n${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n${sentence.trim()}\n\n`;
             }
           });
@@ -1002,8 +1002,8 @@ async function generateSubtitleVideo({
       }
       
       // 字幕フィルターを追加（パスのエスケープを修正）
-      const normalizedSubtitlePath = subtitlePath.replace(/\\/g, '/')
-      const subtitleFilter = `subtitles=${normalizedSubtitlePath}:force_style='FontSize=28,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2,Shadow=1,Bold=1'`
+      const normalizedSubtitlePath = subtitlePath.replace(/\\/g, '/').replace(/'/g, "\\'")
+      const subtitleFilter = `subtitles='${normalizedSubtitlePath}':force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2,Shadow=1,Bold=1,MarginV=50'`
       
       // 動画素材を使用する場合とそうでない場合でフィルターを分ける
       const videoFilters = [`scale=${settings.resolution?.width || 1920}:${settings.resolution?.height || 1080}:force_original_aspect_ratio=decrease,pad=${settings.resolution?.width || 1920}:${settings.resolution?.height || 1080}:(ow-iw)/2:(oh-ih)/2`]
@@ -1022,7 +1022,7 @@ async function generateSubtitleVideo({
       ffmpegCommand.videoFilters(videoFilters)
         .videoCodec('libx264')
         .fps(settings.fps || 30)
-        .outputOptions(['-pix_fmt yuv420p', '-preset medium', '-crf 23'])
+        .outputOptions(['-pix_fmt yuv420p', '-preset fast', '-crf 23', '-movflags', '+faststart'])
       
       // 音声がある場合は音声を統合
       if (hasAudio) {
@@ -1034,14 +1034,8 @@ async function generateSubtitleVideo({
           .audioChannels(2)
           .outputOptions(['-shortest'])
           
-        // 音声と動画を明示的にマッピング
-        if (inputOptions.includes('-loop 1')) {
-          // 静止画像の場合
-          ffmpegCommand.outputOptions(['-map', '0:v:0', '-map', '1:a:0'])
-        } else {
-          // 動画の場合
-          ffmpegCommand.outputOptions(['-map', '0:v:0', '-map', '1:a:0'])
-        }
+        // 音声と動画を明示的にマッピング（修正版）
+        ffmpegCommand.outputOptions(['-map', '0:v', '-map', '1:a'])
       } else {
         console.log('No audio file, creating silent video')
         ffmpegCommand.outputOptions(['-an', '-t', audioDuration.toString()])
