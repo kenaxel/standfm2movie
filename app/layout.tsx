@@ -1,31 +1,8 @@
-import './globals.css'
-import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+export const metadata = { 
+  title: 'StandFM2movie',
+  description: '音声から記事や動画を自動生成！'
+};
 
-const inter = Inter({ subsets: ['latin'] })
-
-export const metadata: Metadata = {
-  title: 'スタエフ→note記事＋画像自動生成ツール',
-  description: '音声から5分でnote記事が完成！',
-}
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  return (
-    <html lang="ja">
-      <body className={inter.className}>{children}</body>
-    </html>
-  )
-}
-
-
-
-
-
-export const metadata = { title: 'StandFM2movie' };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
