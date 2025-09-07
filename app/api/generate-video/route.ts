@@ -800,7 +800,8 @@ async function generateSubtitleVideo({
   settings,
   tempDir,
   timeline,
-  audioDuration
+  audioDuration,
+  outputPath
 }: {
   audioPath: string
   audioInput: string
@@ -809,9 +810,10 @@ async function generateSubtitleVideo({
   tempDir: string
   timeline?: any
   audioDuration: number
+  outputPath?: string
 }): Promise<string> {
-  const timestamp = Date.now()
-  const outputPath = path.join(tempDir, `output_${timestamp}.mp4`)
+  // 出力パスが指定されていない場合は一時ディレクトリを使用
+  const finalOutputPath = outputPath || path.join(tempDir, `output_${Date.now()}.mp4`)
   
   console.log('Generating video with audio and subtitles')
   
@@ -1017,16 +1019,28 @@ async function generateSubtitleVideo({
       }
       
       ffmpegCommand
-        .output(outputPath)
+        .output(finalOutputPath)
         .on('start', (commandLine) => {
           console.log('FFmpeg command:', commandLine)
+          console.log('出力先:', finalOutputPath)
         })
         .on('progress', (progress) => {
           console.log('Processing: ' + progress.percent + '% done')
         })
         .on('end', () => {
-          console.log('Subtitle video generation completed')
-          resolve(outputPath)
+          console.log('Subtitle video generation completed at:', finalOutputPath)
+          // ファイルの存在を確認
+          if (fs.existsSync(finalOutputPath)) {
+            const stats = fs.statSync(finalOutputPath)
+            console.log('生成された動画ファイル:', {
+              path: finalOutputPath,
+              size: stats.size,
+              sizeInMB: (stats.size / 1024 / 1024).toFixed(2) + ' MB'
+            })
+          } else {
+            console.error('動画ファイルが生成されませんでした:', finalOutputPath)
+          }
+          resolve(finalOutputPath)
         })
         .on('error', (err) => {
           console.error('FFmpeg error:', err)
@@ -1369,44 +1383,43 @@ export async function POST(request: NextRequest) {
       audioDuration
     })
     
-    // 生成された動画を正しい出力パスにコピー
-    if (fs.existsSync(tempVideoPath)) {
-      await fs.promises.copyFile(tempVideoPath, outputPath)
-      console.log('動画ファイルを出力ディレクトリにコピー:', tempVideoPath, '->', outputPath)
-      
-      // コピー後のファイル確認
-      if (fs.existsSync(outputPath)) {
-        const stats = await fs.promises.stat(outputPath)
-        console.log('コピー後のファイル確認:', {
-          path: outputPath,
-          size: stats.size,
-          exists: true
-        })
-      } else {
-        console.error('コピー後にファイルが見つかりません:', outputPath)
-      }
-    } else {
-      console.error('一時動画ファイルが見つかりません:', tempVideoPath)
-      console.log('一時ディレクトリの内容:', fs.readdirSync(tempDir))
-      throw new Error('一時動画ファイルが見つかりません: ' + tempVideoPath)
-    }
+    // generateSubtitleVideoは一時ディレクトリに動画を生成するので、
+    // 正しい出力パスに直接生成するように変更
+    console.log('動画生成を正しい出力パスで実行:', outputPath)
+    
+    // 一時動画パスではなく、直接最終出力パスを使用
+    const finalVideoPath = await generateSubtitleVideo({
+      audioPath: audioPath || '',
+      audioInput: audioText,
+      transcript: transcriptWithTimestamps.length > 0 ? transcriptWithTimestamps : (processedTranscript || []),
+      settings,
+      tempDir,
+      timeline: timelineResult,
+      audioDuration,
+      outputPath: outputPath  // 直接出力パスを指定
+    })
+    
+    console.log('動画生成完了、最終パス:', finalVideoPath)
     
     // 動画ファイルが生成されたか確認
-    if (fs.existsSync(outputPath)) {
-      const stats = await fs.promises.stat(outputPath)
+    if (fs.existsSync(finalVideoPath)) {
+      const stats = await fs.promises.stat(finalVideoPath)
       fileSize = stats.size
       console.log('Video file generated successfully:', {
-        path: outputPath,
+        path: finalVideoPath,
         size: fileSize,
         sizeInMB: (fileSize / 1024 / 1024).toFixed(2) + ' MB'
       })
       
       // public/outputディレクトリの内容も確認
-      const outputDir = path.dirname(outputPath)
+      const outputDir = path.dirname(finalVideoPath)
       const outputFiles = fs.readdirSync(outputDir)
       console.log('出力ディレクトリの内容:', outputFiles)
+      
+      // outputPathを更新
+      outputPath = finalVideoPath
     } else {
-      console.error('最終的な動画ファイルが見つかりません:', outputPath)
+      console.error('最終的な動画ファイルが見つかりません:', finalVideoPath)
       throw new Error('動画ファイルの生成に失敗しました')
     }
     
