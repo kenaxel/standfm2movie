@@ -580,3 +580,11 @@ export default function Home() {
 
 
 
+export default function Page() {
+  return (
+    <main style={{ padding: 24 }}>
+      <h1>StandFM2movie</h1>
+      <p>トップページ表示テスト</p>
+    </main>
+  );
+}
