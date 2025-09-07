@@ -1446,8 +1446,8 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // APIルート経由のパスを使用（より確実）
-    const publicVideoPath = `/api/output/${jobId}.mp4`
+    // 静的ファイルパスを使用（Next.jsの標準的な静的ファイル配信）
+    const publicVideoPath = `/output/${jobId}.mp4`
     
     result = {
       videoUrl: publicVideoPath,

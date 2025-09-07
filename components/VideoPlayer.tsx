@@ -17,22 +17,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [error, setError] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   
-  // シンプルな動画URL設定
+  // 動画URL設定
   useEffect(() => {
     setIsLoading(true)
     setError(null)
     
     console.log('VideoPlayer: 動画URL設定:', videoUrl)
     
-    // 動画要素に直接URLを設定
     if (videoRef.current) {
-      // キャッシュバスターを追加
-      const timestamp = Date.now()
-      const urlWithCache = videoUrl.includes('?') 
-        ? `${videoUrl}&t=${timestamp}` 
-        : `${videoUrl}?t=${timestamp}`
-      
-      videoRef.current.src = urlWithCache
+      videoRef.current.src = videoUrl
       videoRef.current.load()
     }
   }, [videoUrl])
@@ -56,39 +49,30 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const handleError = (e: any) => {
     console.error('動画読み込みエラー:', e)
     setIsLoading(false)
-    
-    if (videoRef.current && videoRef.current.error) {
-      const errorCode = videoRef.current.error.code
-      console.error('エラーコード:', errorCode)
-      
-      switch (errorCode) {
-        case 1:
-          setError('動画の読み込みが中断されました')
-          break
-        case 2:
-          setError('ネットワークエラーが発生しました')
-          break
-        case 3:
-          setError('動画ファイルの形式に問題があります')
-          break
-        case 4:
-          setError('動画ファイルが見つかりません')
-          break
-        default:
-          setError('動画の読み込みに失敗しました')
-      }
-    } else {
-      setError('動画の読み込みに失敗しました')
-    }
+    setError('動画の読み込みに失敗しました')
   }
 
-  const handleDownload = () => {
-    const link = document.createElement('a')
-    link.href = videoUrl
-    link.download = `${title}.mp4`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+  const handleDownload = async () => {
+    try {
+      // 動画ファイルを直接ダウンロード
+      const response = await fetch(videoUrl)
+      if (!response.ok) {
+        throw new Error('ダウンロードに失敗しました')
+      }
+      
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${title}.mp4`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('ダウンロードエラー:', error)
+      alert('ダウンロードに失敗しました')
+    }
   }
 
   const handleRetry = () => {
@@ -96,43 +80,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setIsLoading(true)
     
     if (videoRef.current) {
-      // 複数のパスを試行
       const timestamp = Date.now()
-      const pathsToTry = [
-        videoUrl.replace('/output/', '/api/output/'),
-        videoUrl,
-        videoUrl.replace('/api/output/', '/output/')
-      ]
+      const urlWithCache = videoUrl.includes('?') 
+        ? `${videoUrl}&retry=${timestamp}` 
+        : `${videoUrl}?retry=${timestamp}`
       
-      let currentPathIndex = 0
-      
-      const tryNextPath = () => {
-        if (currentPathIndex >= pathsToTry.length) {
-          setError('すべてのパスで動画ファイルが見つかりませんでした')
-          setIsLoading(false)
-          return
-        }
-        
-        const currentPath = pathsToTry[currentPathIndex]
-        const urlWithCache = currentPath.includes('?') 
-          ? `${currentPath}&retry=${timestamp}` 
-          : `${currentPath}?retry=${timestamp}`
-        
-        console.log('試行中のパス:', urlWithCache)
-        
-        videoRef.current!.src = urlWithCache
-        videoRef.current!.load()
-        
-        // 3秒後に次のパスを試行
-        setTimeout(() => {
-          if (isLoading) {
-            currentPathIndex++
-            tryNextPath()
-          }
-        }, 3000)
-      }
-      
-      tryNextPath()
+      videoRef.current.src = urlWithCache
+      videoRef.current.load()
     }
   }
 
@@ -174,20 +128,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               ref={videoRef}
               className="w-full aspect-video"
               controls
-              preload="auto"
+              preload="metadata"
               playsInline
-              crossOrigin="anonymous"
               onLoadStart={handleLoadStart}
               onCanPlay={handleCanPlay}
               onLoadedData={handleLoadedData}
               onError={handleError}
-              onLoadedMetadata={() => {
-                console.log('動画メタデータ読み込み完了')
-                if (videoRef.current) {
-                  console.log('動画の長さ:', videoRef.current.duration, '秒')
-                }
-                setIsLoading(false)
-              }}
             >
               お使いのブラウザは動画の再生をサポートしていません。
             </video>
@@ -215,7 +161,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors text-sm"
             >
               <svg className="inline-block w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
               </svg>
               新しいタブで開く
             </button>
