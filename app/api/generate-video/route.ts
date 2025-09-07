@@ -4,20 +4,23 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 
-// 音声ファイルの長さを取得する関数（簡易版）
+// FFmpegを使って正確な音声長を取得
 async function getAudioDuration(audioPath: string): Promise<number> {
-  try {
-    // ファイルサイズから推定（簡易的な方法）
-    const stats = await fs.promises.stat(audioPath)
-    const fileSizeInMB = stats.size / (1024 * 1024)
-    // MP3の場合、1MBあたり約1分と仮定
-    const estimatedDuration = Math.max(10, Math.min(300, fileSizeInMB * 60))
-    console.log('推定音声長:', estimatedDuration, '秒')
-    return estimatedDuration
-  } catch (error) {
-    console.error('音声長取得エラー:', error)
-    return 60 // デフォルト値
-  }
+  return new Promise((resolve, reject) => {
+    const { exec } = require('child_process')
+    const command = `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${audioPath}"`
+    
+    exec(command, (error: any, stdout: any, stderr: any) => {
+      if (error) {
+        console.error('音声長取得エラー:', error)
+        resolve(60) // デフォルト値
+      } else {
+        const duration = parseFloat(stdout.trim())
+        console.log('実際の音声長:', duration, '秒')
+        resolve(duration)
+      }
+    })
+  })
 }
 
 // 音声ファイルの処理関数（簡素化）
@@ -48,8 +51,27 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<strin
   }
 }
 
-// 新しいシンプルな動画生成関数
-async function generateVideoWithSubtitles({
+// キーワード抽出関数
+function extractKeywords(text: string): string[] {
+  const stopWords = ['は', 'が', 'の', 'に', 'を', 'と', 'です', 'ます', 'した', 'から', 'など', 'これ', 'それ', 'あれ', 'で', 'も', 'や', 'て', 'に', 'が']
+  const words = text.split(/[\s、。！？.,!?]/).filter(word => 
+    word.length > 1 && !stopWords.includes(word) && !/^[0-9]+$/.test(word)
+  )
+  
+  // 頻度でソート
+  const wordCount: { [key: string]: number } = {}
+  words.forEach(word => {
+    wordCount[word] = (wordCount[word] || 0) + 1
+  })
+  
+  return Object.entries(wordCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([word]) => word)
+}
+
+// 改善された動画生成関数
+async function generateVideoWithTimedSubtitles({
   audioPath,
   transcript,
   settings,
@@ -62,7 +84,7 @@ async function generateVideoWithSubtitles({
   outputPath: string
   tempDir: string
 }): Promise<string> {
-  console.log('新しい動画生成開始')
+  console.log('タイムスタンプ付き動画生成開始')
   
   try {
     // 音声の長さを取得
@@ -71,68 +93,78 @@ async function generateVideoWithSubtitles({
       audioDuration = await getAudioDuration(audioPath)
     }
     
-    // 字幕ファイル（SRT）を生成
+    console.log('音声長:', audioDuration, '秒')
+    console.log('字幕セグメント数:', transcript.length)
+    
+    // 字幕ファイル（SRT）を正確なタイムスタンプで生成
     const srtPath = path.join(tempDir, 'subtitles.srt')
     let srtContent = ''
     
     if (transcript && transcript.length > 0) {
       transcript.forEach((segment, index) => {
+        // タイムスタンプを正確に設定
         const startTime = formatSRTTime(segment.startTime)
         const endTime = formatSRTTime(segment.endTime)
-        srtContent += `${index + 1}\n${startTime} --> ${endTime}\n${segment.text}\n\n`
+        srtContent += `${index + 1}\n${startTime} --> ${endTime}\n${segment.text.trim()}\n\n`
+        console.log(`字幕 ${index + 1}: ${startTime} --> ${endTime} | ${segment.text.trim()}`)
       })
     } else {
-      // デフォルトの字幕
-      srtContent = `1\n00:00:00,000 --> 00:00:${Math.min(audioDuration, 60).toString().padStart(2, '0')},000\n生成された動画\n\n`
+      srtContent = `1\n00:00:00,000 --> ${formatSRTTime(audioDuration)}\n生成された動画\n\n`
     }
     
     await fs.promises.writeFile(srtPath, srtContent, 'utf8')
     console.log('字幕ファイル生成完了:', srtPath)
     
-    // シンプルな背景画像を生成
+    // 背景画像を生成（小さめのサイズ）
     const backgroundPath = path.join(tempDir, 'background.jpg')
     const { createCanvas } = require('canvas')
-    const canvas = createCanvas(settings.resolution?.width || 1920, settings.resolution?.height || 1080)
+    const width = settings.resolution?.width || 1280  // サイズを小さく
+    const height = settings.resolution?.height || 720
+    const canvas = createCanvas(width, height)
     const ctx = canvas.getContext('2d')
     
-    // グラデーション背景
-    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height)
-    gradient.addColorStop(0, '#4f46e5')
-    gradient.addColorStop(1, '#7c3aed')
+    // シンプルなグラデーション背景
+    const gradient = ctx.createLinearGradient(0, 0, width, height)
+    gradient.addColorStop(0, '#667eea')
+    gradient.addColorStop(1, '#764ba2')
     ctx.fillStyle = gradient
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.fillRect(0, 0, width, height)
     
-    // 装飾
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)'
-    for (let i = 0; i < 10; i++) {
-      const x = Math.random() * canvas.width
-      const y = Math.random() * canvas.height
-      const radius = Math.random() * 100 + 50
+    // 軽い装飾
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)'
+    for (let i = 0; i < 5; i++) {
+      const x = Math.random() * width
+      const y = Math.random() * height
+      const radius = Math.random() * 50 + 25
       ctx.beginPath()
       ctx.arc(x, y, radius, 0, Math.PI * 2)
       ctx.fill()
     }
     
-    const buffer = canvas.toBuffer('image/jpeg', { quality: 0.8 })
+    const buffer = canvas.toBuffer('image/jpeg', { quality: 0.7 })
     await fs.promises.writeFile(backgroundPath, buffer)
     
-    // FFmpegで動画生成（音声付き、字幕付き）
+    // FFmpegで動画生成（最適化された設定）
     return new Promise((resolve, reject) => {
-      let command = `ffmpeg -y -loop 1 -i "${backgroundPath}" -t ${audioDuration}`
+      let command = `ffmpeg -y -loop 1 -i "${backgroundPath}"`
       
       // 音声ファイルがある場合は追加
       if (audioPath && fs.existsSync(audioPath)) {
         command += ` -i "${audioPath}"`
+        command += ` -t ${audioDuration}`
+      } else {
+        command += ` -t ${audioDuration}`
       }
       
-      // 字幕フィルターを追加
-      command += ` -vf "subtitles='${srtPath}':force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2'"`
+      // 字幕フィルターを追加（日本語対応、サイズ調整）
+      const subtitleFilter = `subtitles='${srtPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}':force_style='FontName=Arial,FontSize=28,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2,Shadow=1,MarginV=30'`
+      command += ` -vf "${subtitleFilter},scale=${width}:${height}"`
       
-      // 出力設定
-      command += ` -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p`
+      // 出力設定（ファイルサイズを小さく）
+      command += ` -c:v libx264 -preset medium -crf 28 -pix_fmt yuv420p`
       
       if (audioPath && fs.existsSync(audioPath)) {
-        command += ` -c:a aac -b:a 128k -shortest`
+        command += ` -c:a aac -b:a 96k -shortest`
       }
       
       command += ` "${outputPath}"`
@@ -140,13 +172,14 @@ async function generateVideoWithSubtitles({
       console.log('FFmpeg コマンド:', command)
       
       const { exec } = require('child_process')
-      exec(command, (error: any, stdout: any, stderr: any) => {
+      exec(command, { maxBuffer: 1024 * 1024 * 10 }, (error: any, stdout: any, stderr: any) => {
         if (error) {
           console.error('FFmpeg エラー:', error)
           console.error('stderr:', stderr)
           reject(error)
         } else {
           console.log('動画生成完了')
+          console.log('stdout:', stdout)
           resolve(outputPath)
         }
       })
@@ -222,8 +255,8 @@ export async function POST(request: NextRequest) {
     
     console.log('動画生成開始:', outputPath)
     
-    // 新しいシンプルな動画生成を実行
-    const finalVideoPath = await generateVideoWithSubtitles({
+    // 改善された動画生成を実行
+    const finalVideoPath = await generateVideoWithTimedSubtitles({
       audioPath,
       transcript: processedTranscript,
       settings,

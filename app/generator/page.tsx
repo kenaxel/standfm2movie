@@ -26,15 +26,15 @@ export default function GeneratorPage() {
     format: 'youtube',
     duration: 60,
     fps: 30,
-    resolution: { width: 1920, height: 1080 },
+    resolution: { width: 1280, height: 720 }, // サイズを小さく
     backgroundColor: '#000000',
     fontFamily: 'Arial',
-    fontSize: 32,
+    fontSize: 28,
     captionStyle: {
       position: 'bottom',
       backgroundColor: 'rgba(0, 0, 0, 0.7)',
       color: '#ffffff',
-      fontSize: 32,
+      fontSize: 28,
       fontFamily: 'Arial',
       fontWeight: 'normal',
       outline: false,
@@ -199,21 +199,44 @@ export default function GeneratorPage() {
           }
         }
         
-        // 文字起こしを字幕セグメントに変換
+        // 文字起こしを適切な長さのセグメントに分割
         const transcriptSegments = []
         const sentences = currentTranscript.split(/[。.!?！？]/g).filter(s => s.trim().length > 0)
         const totalDuration = videoSettings.duration
-        const segmentDuration = totalDuration / Math.max(sentences.length, 1)
+        
+        // 各文の長さに応じて時間を配分
+        const totalTextLength = sentences.reduce((sum, sentence) => sum + sentence.length, 0)
+        let currentTime = 0
         
         sentences.forEach((sentence, index) => {
-          transcriptSegments.push({
-            text: sentence.trim(),
-            startTime: index * segmentDuration,
-            endTime: Math.min((index + 1) * segmentDuration, totalDuration)
-          })
+          const trimmedSentence = sentence.trim()
+          if (trimmedSentence) {
+            // 文の長さに応じて表示時間を計算（最低2秒、最大8秒）
+            const textLength = trimmedSentence.length
+            const proportion = textLength / totalTextLength
+            const baseDuration = totalDuration * proportion
+            const duration = Math.max(2, Math.min(8, baseDuration))
+            
+            const startTime = currentTime
+            const endTime = Math.min(currentTime + duration, totalDuration)
+            
+            transcriptSegments.push({
+              text: trimmedSentence,
+              startTime: startTime,
+              endTime: endTime
+            })
+            
+            currentTime = endTime
+            console.log(`セグメント ${index + 1}: ${startTime.toFixed(1)}s - ${endTime.toFixed(1)}s | ${trimmedSentence}`)
+          }
         })
         
-        console.log('字幕セグメント:', transcriptSegments)
+        // 最後のセグメントが動画の長さに達していない場合は調整
+        if (transcriptSegments.length > 0 && transcriptSegments[transcriptSegments.length - 1].endTime < totalDuration) {
+          transcriptSegments[transcriptSegments.length - 1].endTime = totalDuration
+        }
+        
+        console.log('改善された字幕セグメント:', transcriptSegments.length, '個')
         
         // 動画生成リクエスト
         const videoResponse = await fetch('/api/generate-video', {
@@ -454,6 +477,21 @@ export default function GeneratorPage() {
                     min="10"
                     max="300"
                   />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">解像度</label>
+                  <select
+                    value={`${videoSettings.resolution.width}x${videoSettings.resolution.height}`}
+                    onChange={(e) => {
+                      const [width, height] = e.target.value.split('x').map(Number)
+                      setVideoSettings(prev => ({ ...prev, resolution: { width, height } }))
+                    }}
+                    className="w-full p-2 border rounded-md"
+                  >
+                    <option value="1280x720">HD (1280x720)</option>
+                    <option value="1920x1080">Full HD (1920x1080)</option>
+                    <option value="720x1280">縦型 (720x1280)</option>
+                  </select>
                 </div>
               </div>
             </div>
