@@ -91,41 +91,31 @@ async function searchMediaAssets(keywords: string[], scenes: any[]): Promise<Vid
       console.log(`シーン ${scene.startTime}-${scene.endTime}s の検索クエリ:`, searchQuery)
       
       try {
-        // Pexelsから動画を検索 - 各シーンに複数の動画を割り当て
-        const videos = await searchVideos(searchQuery, 5) // 増加
+        // Pexelsから動画を検索（検索数を2に減らして効率化）
+        const videos = await searchVideos(searchQuery, 2)
         for (const video of videos) {
           assets.push({
             type: 'video',
             url: video.url,
-            duration: Math.min(video.duration || 10, scene.endTime - scene.startTime),
+            duration: video.duration || 8, // デフォルト動画時間を8秒に短縮
             startTime: scene.startTime,
             endTime: scene.endTime
           })
         }
         
-        // Unsplashから画像を検索 - 各シーンに複数の画像を割り当て
-        const images = await searchPhotos(searchQuery, 8) // 増加
+        // Unsplashから画像を検索（検索数を3に減らして効率化）
+        const images = await searchPhotos(searchQuery, 3)
         for (const image of images) {
-          // 画像の表示時間を短くして複数表示できるようにする
-          const imageDuration = 3; // 短縮
-          // シーン内で均等に分散させる
-          const availableTime = scene.endTime - scene.startTime;
-          const imageIndex = assets.filter(a => 
-            a.startTime >= scene.startTime && 
-            a.endTime <= scene.endTime && 
-            a.type === 'image'
-          ).length;
-          
-          // 画像の開始時間を計算（シーン内で均等に分散）
-          const imageStartTime = scene.startTime + 
-            (imageIndex * (availableTime / Math.max(images.length, 1)));
+          // シーンの長さに基づいて画像表示時間を動的に調整
+          const sceneDuration = scene.endTime - scene.startTime
+          const imageDuration = Math.min(Math.max(sceneDuration * 0.8, 3), 8) // 3-8秒の範囲で調整
           
           assets.push({
             type: 'image',
             url: image.url,
             duration: imageDuration,
-            startTime: imageStartTime,
-            endTime: Math.min(imageStartTime + imageDuration, scene.endTime)
+            startTime: scene.startTime,
+            endTime: scene.endTime
           })
         }
         
@@ -183,38 +173,53 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<strin
       console.log('Text input detected, generating speech...')
       audioPath = path.join(tempDir, 'synthesized_audio.mp3')
       
-      // 簡単な音声合成（実際の実装では外部APIを使用）
-      // ここでは無音の音声ファイルを生成
-      const { spawn } = require('child_process')
-      
-      return new Promise((resolve, reject) => {
-        // テキストを音声に変換（簡易版：ビープ音を生成）
-        const duration = 10 // 10秒
-        const ffmpeg = spawn('ffmpeg', [
-          '-f', 'lavfi',
-          '-i', `sine=frequency=440:duration=${duration}`,
-          '-c:a', 'mp3',
-          '-ar', '44100',
-          '-ac', '2',
-          '-y',
-          audioPath
-        ])
+      // OpenAI Text-to-Speech APIを使用した音声合成
+      try {
+        const mp3 = await openai.audio.speech.create({
+          model: "tts-1",
+          voice: "alloy",
+          input: audioInput,
+        });
         
-        ffmpeg.on('close', (code: number) => {
-          if (code === 0) {
-            console.log('Synthesized audio created:', audioPath)
-            resolve(audioPath)
-          } else {
-            console.error('Failed to create synthesized audio')
+        const buffer = Buffer.from(await mp3.arrayBuffer());
+        await fs.promises.writeFile(audioPath, buffer);
+        console.log('Synthesized audio created with OpenAI TTS:', audioPath)
+        return audioPath
+      } catch (ttsError) {
+        console.error('OpenAI TTS failed, falling back to silent audio:', ttsError)
+        
+        // フォールバック：無音の音声ファイルを生成
+        const { spawn } = require('child_process')
+        
+        return new Promise((resolve, reject) => {
+          // テキストの長さに基づいて音声の長さを計算（1文字あたり0.1秒）
+          const duration = Math.max(10, Math.min(300, audioInput.length * 0.1)) // 10秒〜300秒
+          const ffmpeg = spawn('ffmpeg', [
+            '-f', 'lavfi',
+            '-i', `sine=frequency=440:duration=${duration}`,
+            '-c:a', 'mp3',
+            '-ar', '44100',
+            '-ac', '2',
+            '-y',
+            audioPath
+          ])
+          
+          ffmpeg.on('close', (code: number) => {
+            if (code === 0) {
+              console.log('Fallback synthesized audio created:', audioPath)
+              resolve(audioPath)
+            } else {
+              console.error('Failed to create fallback synthesized audio')
+              resolve(null)
+            }
+          })
+          
+          ffmpeg.on('error', (err: Error) => {
+            console.error('FFmpeg error:', err)
             resolve(null)
-          }
+          })
         })
-        
-        ffmpeg.on('error', (err: Error) => {
-          console.error('FFmpeg error:', err)
-          resolve(null)
-        })
-      })
+      }
     } else if (audioInput.type === 'file' && audioInput.data) {
       // Base64データから音声ファイルを保存
       const audioBuffer = Buffer.from(audioInput.data, 'base64')
@@ -687,35 +692,26 @@ async function transcribeAudioWithTimestamps(audioPath: string): Promise<Transcr
     const segments: TranscriptSegment[] = []
     if (transcription.segments && Array.isArray(transcription.segments)) {
       for (const segment of transcription.segments) {
-        segments.push({
-          text: segment.text.trim(),
-          startTime: segment.start,
-          endTime: segment.end
-        })
+        // セグメントのテキストが空でない場合のみ追加
+        const trimmedText = segment.text.trim()
+        if (trimmedText) {
+          segments.push({
+            text: trimmedText,
+            startTime: segment.start,
+            endTime: segment.end
+          })
+        }
       }
     } else if (transcription.text) {
-      // セグメント情報がない場合は文を分割して複数のセグメントを作成
-      const text = transcription.text.trim();
-      const sentences = text.split(/[。.!?！？]/).filter(s => s.trim());
-      
-      // 音声の長さを推定（デフォルト60秒）
-      let audioDuration = 60;
-      try {
-        audioDuration = await getAudioDuration(audioPath);
-      } catch (err) {
-        console.log('音声長の取得に失敗、デフォルト値を使用:', err);
-      }
-      
-      // 各文に均等に時間を割り当て
-      const segmentDuration = audioDuration / Math.max(sentences.length, 1);
-      
-      sentences.forEach((sentence, index) => {
+      // セグメント情報がない場合は全体を一つのセグメントとして扱う
+      const trimmedText = transcription.text.trim()
+      if (trimmedText) {
         segments.push({
-          text: sentence.trim(),
-          startTime: index * segmentDuration,
-          endTime: (index + 1) * segmentDuration
-        });
-      });
+          text: trimmedText,
+          startTime: 0,
+          endTime: 60 // デフォルト値
+        })
+      }
     }
     
     console.log('文字起こし完了:', segments.length, '個のセグメント')
@@ -809,11 +805,11 @@ async function generateSubtitleVideo({
       
       if (isJapanese) {
         // 日本語テキストの場合：句読点で分割
-        const sentences = text.split(/[。！？]/).filter(s => s.trim());
+        const sentences = text.split(/[。！？]/).filter((s: string) => s.trim());
         const segmentCount = Math.min(sentences.length, 30); // 最大30セグメント
         const segmentDuration = audioDuration / Math.max(segmentCount, 1);
         
-        sentences.forEach((sentence, index) => {
+        sentences.forEach((sentence: string, index: number) => {
           if (index < 30 && sentence.trim()) { // 最大30セグメントまで
             const startTime = index * segmentDuration;
             const endTime = (index + 1) * segmentDuration;

@@ -98,7 +98,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onCanPlay={handleCanPlay}
               onError={handleError}
             >
-              <source src={videoUrl} type="video/mp4" />
+              <source src={`${videoUrl}?t=${Date.now()}`} type="video/mp4" />
               お使いのブラウザは動画の再生に対応していません。
             </video>
           )}
