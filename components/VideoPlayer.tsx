@@ -128,13 +128,24 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               ref={videoRef}
               className="w-full aspect-video"
               controls
-              preload="metadata"
+              preload="auto"
               playsInline
+              muted={false}
               onLoadStart={handleLoadStart}
               onCanPlay={handleCanPlay}
               onLoadedData={handleLoadedData}
               onError={handleError}
+              onLoadedMetadata={() => {
+                console.log('動画メタデータ読み込み完了')
+                if (videoRef.current) {
+                  console.log('動画の長さ:', videoRef.current.duration, '秒')
+                  console.log('動画の幅:', videoRef.current.videoWidth)
+                  console.log('動画の高さ:', videoRef.current.videoHeight)
+                }
+                setIsLoading(false)
+              }}
             >
+              <source src={videoUrl} type="video/mp4" />
               お使いのブラウザは動画の再生をサポートしていません。
             </video>
           )}

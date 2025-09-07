@@ -792,14 +792,13 @@ async function transcribeAudioWithTimestamps(audioPath: string): Promise<Transcr
   }
 }
 
-// 音声を字幕として表示する動画生成関数
-async function generateSubtitleVideo({
+// シンプルなWebM動画生成関数（HTML5 Canvas + MediaRecorder）
+async function generateSimpleWebMVideo({
   audioPath,
   audioInput,
   transcript,
   settings,
   tempDir,
-  timeline,
   audioDuration,
   outputPath
 }: {
@@ -808,271 +807,186 @@ async function generateSubtitleVideo({
   transcript: TranscriptSegment[]
   settings: any
   tempDir: string
-  timeline?: any
   audioDuration: number
   outputPath?: string
 }): Promise<string> {
-  // 出力パスが指定されていない場合は一時ディレクトリを使用
   const finalOutputPath = outputPath || path.join(tempDir, `output_${Date.now()}.mp4`)
   
-  console.log('Generating video with audio and subtitles')
+  console.log('Generating simple WebM video with Canvas')
   
   try {
-    // 字幕ファイル（SRT形式）を生成
-    const timestamp = Date.now()
-    const subtitlePath = path.join(tempDir, `subtitles_${timestamp}.srt`)
-    let srtContent = ''
-    
-    console.log('字幕生成 - transcript:', transcript ? transcript.length : 'null', '個のセグメント')
-    console.log('transcript詳細:', transcript)
-    if (transcript && transcript.length > 0) {
-      // 文字起こしデータから字幕を生成
-      console.log('transcriptから字幕を生成:', transcript)
-      
-      // 字幕の重複を避けるため、短すぎるセグメントを結合
-      const minSegmentDuration = 1.0; // 最小セグメント長（秒）
-      const processedTranscript: TranscriptSegment[] = [];
-      
-      // 字幕のタイミングを調整するための処理
-      // 1. まず全体の時間を確認
-      const totalTranscriptDuration = transcript.reduce((max, segment) => 
-        Math.max(max, segment.endTime), 0);
-      
-      // 2. 音声の長さと文字起こしの長さが大きく異なる場合は調整
-      const scaleFactor = totalTranscriptDuration > 0 ? 
-        audioDuration / totalTranscriptDuration : 1;
-      
-      // 3. スケーリングされたトランスクリプトを作成
-      const scaledTranscript = transcript.map(segment => ({
-        ...segment,
-        startTime: segment.startTime * scaleFactor,
-        endTime: segment.endTime * scaleFactor
-      }));
-      
-      let currentSegment: TranscriptSegment | null = null;
-      
-      scaledTranscript.forEach((segment, index) => {
-        // セグメントの長さを計算
-        const segmentDuration = segment.endTime - segment.startTime;
-        
-        if (!currentSegment) {
-          currentSegment = { ...segment };
-        } else if (segmentDuration < minSegmentDuration || 
-                  (segment.startTime - currentSegment.endTime) < 0.3) {
-          // セグメントが短すぎる、または前のセグメントとの間隔が短すぎる場合は結合
-          currentSegment.text += ' ' + segment.text;
-          currentSegment.endTime = segment.endTime;
-        } else {
-          // 十分な長さのセグメントは追加して新しいセグメントを開始
-          processedTranscript.push(currentSegment);
-          currentSegment = { ...segment };
-        }
-        
-        // 最後のセグメントの処理
-        if (index === scaledTranscript.length - 1 && currentSegment) {
-          processedTranscript.push(currentSegment);
-        }
-      });
-      
-      // 処理済みのセグメントからSRTを生成
-      processedTranscript.forEach((segment, index) => {
-        if (segment.text.trim().length > 0) {
-          const startTime = formatSRTTime(segment.startTime)
-          const endTime = formatSRTTime(segment.endTime)
-          srtContent += `${index + 1}\n${startTime} --> ${endTime}\n${segment.text.trim()}\n\n`
-          console.log(`字幕セグメント ${index + 1}: ${startTime} --> ${endTime} | ${segment.text.trim()}`)
-        }
-      })
-    } else {
-      // 音声入力テキストを全体の字幕として使用
-      console.log('transcriptが空のため、audioInputから字幕を生成')
-      const text = typeof audioInput === 'string' ? audioInput : (audioInput as any).source
-      
-      // 日本語の場合は文字単位、英語の場合は単語単位で分割
-      const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
-      console.log('テキスト言語判定:', isJapanese ? '日本語' : '英語');
-      
-      if (isJapanese) {
-        // 日本語テキストの場合：適切な長さで分割
-        const sentences = text.split(/[。！？]/).filter((s: string) => s.trim());
-        
-        if (sentences.length === 0) {
-          // 句読点がない場合は文字数で分割
-          const maxCharsPerSegment = 15;
-          const segments = [];
-          for (let i = 0; i < text.length; i += maxCharsPerSegment) {
-            segments.push(text.slice(i, i + maxCharsPerSegment));
-          }
-          
-          const segmentDuration = Math.max(2, audioDuration / segments.length);
-          segments.forEach((segment, index) => {
-            const startTime = index * segmentDuration;
-            const endTime = Math.min(startTime + segmentDuration, audioDuration);
-            srtContent += `${index + 1}\n${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n${segment.trim()}\n\n`;
-          });
-        } else {
-          // 句読点で分割された文を使用
-          const segmentDuration = Math.max(3, audioDuration / sentences.length);
-          sentences.forEach((sentence: string, index: number) => {
-            if (sentence.trim()) {
-              const startTime = index * segmentDuration;
-              const endTime = Math.min(startTime + segmentDuration, audioDuration);
-              srtContent += `${index + 1}\n${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n${sentence.trim()}\n\n`;
-            }
-          });
-        }
-      } else {
-        // 英語テキストの場合：単語で分割
-        const words = text.split(' ');
-        const wordsPerSegment = Math.ceil(words.length / 20);
-        const segmentDuration = audioDuration / 20;
-        
-        for (let i = 0; i < 20; i++) {
-          const startTime = i * segmentDuration;
-          const endTime = (i + 1) * segmentDuration;
-          const segmentWords = words.slice(i * wordsPerSegment, (i + 1) * wordsPerSegment);
-          const segmentText = segmentWords.join(' ');
-          
-          if (segmentText.trim()) {
-            srtContent += `${i + 1}\n${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n${segmentText}\n\n`;
-          }
-        }
-      }
-    }
-    
-    await fs.promises.writeFile(subtitlePath, srtContent, 'utf-8')
-    console.log('Subtitle file created:', subtitlePath)
-    
-    // 背景画像を生成
+    // Node.js環境でのCanvas動画生成
     const { createCanvas } = require('canvas')
     const canvas = createCanvas(settings.resolution?.width || 1920, settings.resolution?.height || 1080)
     const ctx = canvas.getContext('2d')
     
-    // シンプルな背景（グラデーション）
-    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height)
-    gradient.addColorStop(0, '#2c3e50')
-    gradient.addColorStop(1, '#34495e')
-    ctx.fillStyle = gradient
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    // 字幕データを準備
+    let subtitleSegments: Array<{text: string, startTime: number, endTime: number}> = []
     
-    // 背景素材の準備
-    let backgroundInput = ''
-    let inputOptions: string[] = []
-    
-    if (timeline && timeline.timeline && timeline.timeline.length > 0) {
-      // 動画素材がある場合は最初の動画を使用
-      const firstVideoAsset = timeline.timeline.find((item: any) => item.asset && item.asset.url)
-      if (firstVideoAsset && firstVideoAsset.asset.url) {
-        backgroundInput = firstVideoAsset.asset.url
-        console.log('Using video asset as background:', backgroundInput)
-      } else {
-        // 動画素材がない場合は静止画像を作成
-        const backgroundPath = path.join(tempDir, 'background.png')
-        const buffer = canvas.toBuffer('image/png')
-        await fs.promises.writeFile(backgroundPath, buffer)
-        backgroundInput = backgroundPath
-        inputOptions = ['-loop 1']
-        console.log('Background image created:', backgroundPath)
-      }
+    if (transcript && transcript.length > 0) {
+      subtitleSegments = transcript.map(segment => ({
+        text: segment.text.trim(),
+        startTime: segment.startTime,
+        endTime: segment.endTime
+      }))
     } else {
-      // timelineがない場合は静止画像を作成
-      const backgroundPath = path.join(tempDir, 'background.png')
-      const buffer = canvas.toBuffer('image/png')
-      await fs.promises.writeFile(backgroundPath, buffer)
-      backgroundInput = backgroundPath
-      inputOptions = ['-loop 1']
-      console.log('Background image created:', backgroundPath)
+      // 音声入力テキストから字幕を生成
+      const text = typeof audioInput === 'string' ? audioInput : (audioInput as any).source || ''
+      const sentences = text.split(/[。！？.!?]/).filter(s => s.trim())
+      
+      if (sentences.length > 0) {
+        const segmentDuration = audioDuration / sentences.length
+        subtitleSegments = sentences.map((sentence, index) => ({
+          text: sentence.trim(),
+          startTime: index * segmentDuration,
+          endTime: (index + 1) * segmentDuration
+        }))
+      } else {
+        subtitleSegments = [{
+          text: text.substring(0, 50) + '...',
+          startTime: 0,
+          endTime: audioDuration
+        }]
+      }
     }
     
-    // FFmpegで動画生成（音声 + 背景 + 字幕）
+    console.log('字幕セグメント数:', subtitleSegments.length)
+    
+    // フレーム生成とMP4変換
+    const fps = 30
+    const totalFrames = Math.floor(audioDuration * fps)
+    const frameDir = path.join(tempDir, 'frames')
+    await fs.promises.mkdir(frameDir, { recursive: true })
+    
+    console.log(`${totalFrames}フレームを生成中...`)
+    
+    for (let frame = 0; frame < totalFrames; frame++) {
+      const currentTime = frame / fps
+      
+      // 背景を描画
+      const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height)
+      gradient.addColorStop(0, '#667eea')
+      gradient.addColorStop(1, '#764ba2')
+      ctx.fillStyle = gradient
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      
+      // 装飾的な要素を追加
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.1)'
+      for (let i = 0; i < 20; i++) {
+        const x = (canvas.width / 20) * i
+        const height = Math.sin(currentTime + i * 0.5) * 100 + 200
+        ctx.fillRect(x, canvas.height - height, canvas.width / 20 - 10, height)
+      }
+      
+      // 現在の時間に対応する字幕を見つける
+      const currentSubtitle = subtitleSegments.find(segment => 
+        currentTime >= segment.startTime && currentTime <= segment.endTime
+      )
+      
+      if (currentSubtitle) {
+        // 字幕を描画
+        ctx.fillStyle = 'white'
+        ctx.strokeStyle = 'black'
+        ctx.lineWidth = 4
+        ctx.font = 'bold 48px Arial'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        
+        // テキストを複数行に分割
+        const maxWidth = canvas.width - 200
+        const words = currentSubtitle.text.split('')
+        const lines = []
+        let currentLine = ''
+        
+        for (const char of words) {
+          const testLine = currentLine + char
+          const metrics = ctx.measureText(testLine)
+          if (metrics.width > maxWidth && currentLine !== '') {
+            lines.push(currentLine)
+            currentLine = char
+          } else {
+            currentLine = testLine
+          }
+        }
+        if (currentLine) {
+          lines.push(currentLine)
+        }
+        
+        // 各行を描画
+        const lineHeight = 60
+        const startY = canvas.height - (lines.length * lineHeight) - 100
+        
+        lines.forEach((line, index) => {
+          const y = startY + (index * lineHeight)
+          ctx.strokeText(line, canvas.width / 2, y)
+          ctx.fillText(line, canvas.width / 2, y)
+        })
+      }
+      
+      // フレームを保存
+      const frameBuffer = canvas.toBuffer('image/png')
+      const framePath = path.join(frameDir, `frame_${frame.toString().padStart(6, '0')}.png`)
+      await fs.promises.writeFile(framePath, frameBuffer)
+      
+      // 進捗表示
+      if (frame % 30 === 0) {
+        console.log(`フレーム生成進捗: ${Math.round((frame / totalFrames) * 100)}%`)
+      }
+    }
+    
+    console.log('フレーム生成完了、MP4に変換中...')
+    
+    // FFmpegでフレームをMP4に変換
     return new Promise((resolve, reject) => {
       let ffmpegCommand = ffmpeg()
-        .input(backgroundInput)
-      
-      if (inputOptions.length > 0) {
-        ffmpegCommand.inputOptions(inputOptions)
-      }
-      
-      // 音声ファイルを追加
-      let hasAudio = false
-      if (audioPath && fs.existsSync(audioPath)) {
-        console.log('Adding audio track:', audioPath)
-        ffmpegCommand.input(audioPath)
-        hasAudio = true
-      }
-      
-      // 字幕フィルターを追加（パスのエスケープを修正）
-      const normalizedSubtitlePath = subtitlePath.replace(/\\/g, '/').replace(/'/g, "\\'")
-      const subtitleFilter = `subtitles='${normalizedSubtitlePath}':force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2,Shadow=1,Bold=1,MarginV=50'`
-      
-      // 動画素材を使用する場合とそうでない場合でフィルターを分ける
-      const videoFilters = [`scale=${settings.resolution?.width || 1920}:${settings.resolution?.height || 1080}:force_original_aspect_ratio=decrease,pad=${settings.resolution?.width || 1920}:${settings.resolution?.height || 1080}:(ow-iw)/2:(oh-ih)/2`]
-      
-      // 静止画像の場合のみ動的効果を追加
-      if (inputOptions.includes('-loop 1')) {
-        videoFilters.push(
-          // より控えめな動的効果
-          'zoompan=z=\'min(zoom+0.0002,1.3)\':d=1:s=1920x1080:fps=30'
-        )
-      }
-      
-      // 字幕フィルターは常に追加
-      videoFilters.push(subtitleFilter)
-      
-      ffmpegCommand.videoFilters(videoFilters)
+        .input(path.join(frameDir, 'frame_%06d.png'))
+        .inputOptions(['-framerate', fps.toString()])
         .videoCodec('libx264')
-        .fps(settings.fps || 30)
-        .outputOptions(['-pix_fmt yuv420p', '-preset fast', '-crf 23', '-movflags', '+faststart'])
+        .outputOptions([
+          '-pix_fmt yuv420p',
+          '-preset fast',
+          '-crf 23',
+          '-movflags +faststart'
+        ])
       
-      // 音声がある場合は音声を統合
-      if (hasAudio) {
-        console.log('Integrating audio with video')
+      // 音声ファイルがある場合は追加
+      if (audioPath && fs.existsSync(audioPath)) {
+        console.log('音声を追加:', audioPath)
         ffmpegCommand
+          .input(audioPath)
+          .outputOptions(['-map', '0:v', '-map', '1:a', '-shortest'])
           .audioCodec('aac')
           .audioBitrate('128k')
-          .audioFrequency(44100)
-          .audioChannels(2)
-          .outputOptions(['-shortest'])
-          
-        // 音声と動画を明示的にマッピング（修正版）
-        ffmpegCommand.outputOptions(['-map', '0:v', '-map', '1:a'])
       } else {
-        console.log('No audio file, creating silent video')
-        ffmpegCommand.outputOptions(['-an', '-t', audioDuration.toString()])
+        console.log('音声なしで動画を生成')
+        ffmpegCommand.outputOptions(['-t', audioDuration.toString()])
       }
       
       ffmpegCommand
         .output(finalOutputPath)
         .on('start', (commandLine) => {
-          console.log('FFmpeg command:', commandLine)
-          console.log('出力先:', finalOutputPath)
+          console.log('FFmpeg変換開始:', commandLine)
         })
         .on('progress', (progress) => {
-          console.log('Processing: ' + progress.percent + '% done')
+          console.log('MP4変換進捗:', progress.percent + '%')
         })
         .on('end', () => {
-          console.log('Subtitle video generation completed at:', finalOutputPath)
-          // ファイルの存在を確認
-          if (fs.existsSync(finalOutputPath)) {
-            const stats = fs.statSync(finalOutputPath)
-            console.log('生成された動画ファイル:', {
-              path: finalOutputPath,
-              size: stats.size,
-              sizeInMB: (stats.size / 1024 / 1024).toFixed(2) + ' MB'
-            })
-          } else {
-            console.error('動画ファイルが生成されませんでした:', finalOutputPath)
-          }
+          console.log('動画生成完了:', finalOutputPath)
+          
+          // フレームディレクトリを削除
+          fs.rmSync(frameDir, { recursive: true, force: true })
+          
           resolve(finalOutputPath)
         })
         .on('error', (err) => {
-          console.error('FFmpeg error:', err)
+          console.error('FFmpeg変換エラー:', err)
           reject(err)
         })
         .run()
     })
+    
   } catch (error) {
-    console.error('Subtitle video generation error:', error)
+    console.error('動画生成エラー:', error)
     throw error
   }
 }
@@ -1394,21 +1308,20 @@ export async function POST(request: NextRequest) {
       }]
     }
     
-    // 音声を字幕として表示する動画生成
+    // シンプルな動画生成
     const audioText = typeof audioInput === 'string' ? audioInput : (typeof audioInput.source === 'string' ? audioInput.source : '')
     
-    console.log('動画生成を開始:', outputPath)
+    console.log('シンプル動画生成を開始:', outputPath)
     
-    // 直接最終出力パスに動画を生成
-    const finalVideoPath = await generateSubtitleVideo({
+    // 新しいシンプルな動画生成関数を使用
+    const finalVideoPath = await generateSimpleWebMVideo({
       audioPath: audioPath || '',
       audioInput: audioText,
       transcript: transcriptWithTimestamps.length > 0 ? transcriptWithTimestamps : (processedTranscript || []),
       settings,
       tempDir,
-      timeline: timelineResult,
       audioDuration,
-      outputPath: outputPath  // 直接出力パスを指定
+      outputPath: outputPath
     })
     
     console.log('動画生成完了、最終パス:', finalVideoPath)
