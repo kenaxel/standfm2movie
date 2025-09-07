@@ -1324,8 +1324,6 @@ export async function POST(request: NextRequest) {
     outputPath = path.join(outputDir, `${jobId}.mp4`)
     console.log('Output path:', outputPath)
     
-    // 音声ファイルを処理
-    const audioPath = await processAudioFile(audioInput, tempDir)
     console.log('processAudioFile結果:', { audioPath, exists: audioPath ? fs.existsSync(audioPath) : false })
     
     // 文字起こし処理を改善
