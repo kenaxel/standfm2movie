@@ -1394,11 +1394,6 @@ export async function POST(request: NextRequest) {
     
     console.log('Video generation completed:', result)
     
-  } catch (error) {
-    console.error('Video generation error:', error)
-    throw error // エラーを再スローして適切にハンドリング
-  }
-    
     console.log('実際の動画生成完了:', {
       title: metadata.title,
       assets: videoAssets.length,
