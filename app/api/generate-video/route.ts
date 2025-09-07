@@ -1413,6 +1413,20 @@ export async function POST(request: NextRequest) {
       throw new Error('動画ファイルの生成に失敗しました')
     }
     
+    // 動画ファイルを確実にpublic/outputに配置
+    const publicOutputDir = path.join(process.cwd(), 'public', 'output')
+    const publicOutputPath = path.join(publicOutputDir, `${jobId}.mp4`)
+    
+    // 出力パスと異なる場合はコピー
+    if (outputPath !== publicOutputPath) {
+      try {
+        await fs.promises.copyFile(outputPath, publicOutputPath)
+        console.log('動画ファイルをpublic/outputにコピー:', publicOutputPath)
+      } catch (copyError) {
+        console.error('public/outputへのコピーに失敗:', copyError)
+      }
+    }
+    
     // 静的ファイルパスを使用（Next.jsの静的ファイル配信）
     const publicVideoPath = `/output/${jobId}.mp4`
     

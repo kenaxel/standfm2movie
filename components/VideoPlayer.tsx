@@ -39,6 +39,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     // 動画URLを直接設定（事前確認なし）
     console.log('動画URL設定:', videoUrlWithCache)
     
+    // 動画要素を強制的にリセット
+    if (videoRef.current) {
+      videoRef.current.load()
+    }
+    
     // 読み込みタイムアウトを設定
     const loadingTimeout = setTimeout(() => {
       if (isLoading) {
@@ -243,7 +248,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     
                     // 動画要素を強制的に再読み込み
                     if (videoRef.current) {
-                      videoRef.current.src = newUrl
+                      // source要素を更新
+                      const sourceElement = videoRef.current.querySelector('source')
+                      if (sourceElement) {
+                        sourceElement.src = newUrl
+                      }
                       videoRef.current.load()
                     }
                   }}
@@ -258,10 +267,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               ref={videoRef}
               className="w-full aspect-video"
               controls
-              preload="auto"
+              preload="metadata"
               playsInline
-              src={cachedVideoUrl}
-              type="video/mp4"
               onLoadStart={handleLoadStart}
               onCanPlay={handleCanPlay}
               onError={handleError}
@@ -269,7 +276,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onSuspend={() => console.log('動画の読み込みが中断されました')}
               onWaiting={() => console.log('動画がデータを待機中です')}
               onAbort={() => console.log('動画の読み込みが中止されました')}
-            />
+            >
+              <source src={cachedVideoUrl} type="video/mp4" />
+              お使いのブラウザは動画の再生をサポートしていません。
+            </video>
           )}
         </div>
         
