@@ -155,21 +155,17 @@ export default function GeneratorPage() {
 
     try {
       if (generationType === 'video') {
-        // 動画生成（既存の文字起こし結果を使用）
+        // 動画生成（簡素化）
         setCurrentStep('creating-video')
         
-        // 音声ファイルをBase64に変換（ファイルの場合）
+        // 音声入力を準備
         let audioInputForVideo: any = null
-    
-        // 毎回新しい音声入力オブジェクトを作成してキャッシュを回避
+        
         if (audioSource && audioSource.type === 'file' && audioSource.source instanceof File) {
           const file = audioSource.source as File
-          
-          // FormDataを使用して直接ファイルを送信する準備
           const formData = new FormData()
           formData.append('audioFile', file)
           
-          // 一時的にファイルをアップロードして処理
           console.log('音声ファイルを一時アップロード中...')
           const uploadResponse = await fetch('/api/upload-temp-audio', {
             method: 'POST',
@@ -181,28 +177,15 @@ export default function GeneratorPage() {
           }
           
           const uploadResult = await uploadResponse.json()
-          
           audioInputForVideo = {
             type: 'tempFile',
-            path: uploadResult.filePath,
-            originalName: file.name,
-            format: file.name.split('.').pop() || 'mp3',
-            size: file.size,
-            uniqueId: `${Date.now()}-${Math.random().toString(36).substring(2)}`,
-            timestamp: Date.now()
+            path: uploadResult.filePath
           }
         } else if (audioSource && audioSource.type === 'url') {
-          // URLの場合、サーバー側でダウンロードして処理するように変更
-          const sourceUrl = audioSource.source;
-          
-          console.log('音声URLを処理中...')
           const downloadResponse = await fetch('/api/download-audio', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              url: sourceUrl,
-              uniqueId: `${Date.now()}-${Math.random().toString(36).substring(2)}`
-            })
+            body: JSON.stringify({ url: audioSource.source })
           })
           
           if (!downloadResponse.ok) {
@@ -210,146 +193,38 @@ export default function GeneratorPage() {
           }
           
           const downloadResult = await downloadResponse.json()
-          
           audioInputForVideo = {
             type: 'tempFile',
-            path: downloadResult.filePath,
-            originalUrl: sourceUrl,
-            uniqueId: downloadResult.uniqueId,
-            timestamp: Date.now()
-          }
-        } else {
-          audioInputForVideo = {
-            ...audioSource,
-            uniqueId: `${Date.now()}-${Math.random().toString(36).substring(2)}`,
-            timestamp: Date.now()
+            path: downloadResult.filePath
           }
         }
         
-        // 文字起こしを適切なセグメントに分割
-        const segmentLength = 5; // 5秒ごとにセグメント分割（より細かく）
-        const transcriptSegments = [];
+        // 文字起こしを字幕セグメントに変換
+        const transcriptSegments = []
+        const sentences = currentTranscript.split(/[。.!?！？]/g).filter(s => s.trim().length > 0)
+        const totalDuration = videoSettings.duration
+        const segmentDuration = totalDuration / Math.max(sentences.length, 1)
         
-        // 文字起こしテキストを文単位で分割
-        const sentences = currentTranscript.split(/[。.!?！？]/g).filter(s => s.trim().length > 0);
-        
-        // 各文に対して適切な時間を割り当て
-        const totalDuration = videoSettings.duration;
-        const avgTimePerSentence = totalDuration / sentences.length;
-        
-        let currentTime = 0;
-        for (let i = 0; i < sentences.length; i++) {
-          // 文の長さに応じて時間を調整（長い文はより長い時間）
-          const sentenceLength = sentences[i].length;
-          const sentenceDuration = Math.max(
-            2, // 最低2秒
-            Math.min(
-              10, // 最大10秒
-              avgTimePerSentence * (sentenceLength / 20) // 文字数に応じて調整
-            )
-          );
-          
-          const startTime = currentTime;
-          const endTime = Math.min(startTime + sentenceDuration, totalDuration);
-          
+        sentences.forEach((sentence, index) => {
           transcriptSegments.push({
-            text: sentences[i].trim(),
-            startTime,
-            endTime,
-            keywords: extractKeywords(sentences[i]) // キーワード抽出
-          });
-          
-          currentTime = endTime;
-        }
+            text: sentence.trim(),
+            startTime: index * segmentDuration,
+            endTime: Math.min((index + 1) * segmentDuration, totalDuration)
+          })
+        })
         
-        // 最後のセグメントが動画の長さに達していない場合は調整
-        if (transcriptSegments.length > 0 && transcriptSegments[transcriptSegments.length - 1].endTime < totalDuration) {
-          transcriptSegments[transcriptSegments.length - 1].endTime = totalDuration;
-        }
+        console.log('字幕セグメント:', transcriptSegments)
         
-        // キーワード抽出関数
-        function extractKeywords(text) {
-          // 簡易的なキーワード抽出（実際はもっと洗練された方法を使うべき）
-          const stopWords = ['は', 'が', 'の', 'に', 'を', 'と', 'です', 'ます', 'した', 'から', 'など', 'これ', 'それ', 'あれ'];
-          const words = text.split(/\s+/);
-          return words
-            .filter(word => word.length > 1 && !stopWords.includes(word))
-            .slice(0, 5); // 最大5つのキーワード
-        }
-        
-        console.log('生成する字幕セグメント:', transcriptSegments);
-        
-        const uniqueCacheBreaker = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
-        
-        // 関連キーワードを抽出（全体から）
-        const allKeywords = extractMainKeywords(currentTranscript);
-        console.log('抽出された主要キーワード:', allKeywords);
-        
-        // 動画生成リクエストを送信
+        // 動画生成リクエスト
         const videoResponse = await fetch('/api/generate-video', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             audioInput: audioInputForVideo,
             settings: videoSettings,
-            transcript: transcriptSegments,
-            customAssets: []
+            transcript: transcriptSegments
           })
         })
-        
-        // 主要キーワードを抽出する関数
-        function extractMainKeywords(text) {
-          // 頻出単語を抽出
-          const words = text.split(/[\s,。.!?！？]/);
-          const wordCount = {};
-          
-          // 単語の出現回数をカウント
-          words.forEach(word => {
-            if (word.length > 1) {
-              wordCount[word] = (wordCount[word] || 0) + 1;
-            }
-          });
-          
-          // 出現回数でソートして上位を取得
-          return Object.entries(wordCount)
-            .filter(([word]) => word.length > 1 && !/^[a-zA-Z0-9]+$/.test(word)) // 日本語の単語を優先
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10)
-            .map(([word]) => word);
-        }
-        
-        // コンテンツタイプを検出する関数
-        function detectContentType(text) {
-          const techKeywords = ['プログラミング', 'コード', 'アプリ', 'ソフトウェア', 'エンジニア', 'デベロッパー', 'コンピューター'];
-          const businessKeywords = ['ビジネス', '経営', '起業', '投資', '営業', 'マーケティング'];
-          const lifestyleKeywords = ['生活', '健康', '料理', '旅行', 'ファッション'];
-          
-          let techScore = 0;
-          let businessScore = 0;
-          let lifestyleScore = 0;
-          
-          techKeywords.forEach(keyword => {
-            if (text.includes(keyword)) techScore += 1;
-          });
-          
-          businessKeywords.forEach(keyword => {
-            if (text.includes(keyword)) businessScore += 1;
-          });
-          
-          lifestyleKeywords.forEach(keyword => {
-            if (text.includes(keyword)) lifestyleScore += 1;
-          });
-          
-          if (techScore > businessScore && techScore > lifestyleScore) {
-            return 'technology';
-          } else if (businessScore > techScore && businessScore > lifestyleScore) {
-            return 'business';
-          } else if (lifestyleScore > techScore && lifestyleScore > businessScore) {
-            return 'lifestyle';
-          } else {
-            return 'general';
-          }
-        }
         
         if (!videoResponse.ok) {
           const errorText = await videoResponse.text()
