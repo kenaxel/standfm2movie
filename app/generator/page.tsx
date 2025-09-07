@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import AudioUpload from '@/components/AudioUpload'
 import SettingsForm from '@/components/SettingsForm'
 import GenerateButton from '@/components/GenerateButton'
@@ -384,8 +384,8 @@ export default function GeneratorPage() {
         const timestamp = Date.now()
         const randomStr = Math.random().toString(36).substring(2, 15)
         
-        // 動画URLを設定（APIを使用）
-        const newVideoUrl = `/api/video/${jobId}/output.mp4?t=${timestamp}&cache=${randomStr}&nocache=true&v=7`;
+        // 動画URLを設定（直接ファイルを提供）
+        const newVideoUrl = `/output/${jobId}.mp4?t=${timestamp}&cache=${randomStr}&nocache=true&v=8`;
         
         const resultWithTimestamp = {
           ...videoResult.result,
@@ -400,14 +400,26 @@ export default function GeneratorPage() {
         
         // 少し待ってから新しい動画を設定（DOMの更新を確実にするため）
         setTimeout(() => {
-          setGeneratedVideo(resultWithTimestamp)
-        }, 500)
-        
-        // さらに遅延させて動画要素を強制的に更新
-        setTimeout(() => {
-          if (videoRef.current) {
-            videoRef.current.load();
-          }
+          // 実際のファイルが存在するか確認
+          fetch(`/output/${jobId}.mp4`, { method: 'HEAD' })
+            .then(response => {
+              if (response.ok) {
+                console.log('動画ファイルが存在します:', response.status);
+                setGeneratedVideo(resultWithTimestamp);
+              } else {
+                console.error('動画ファイルが見つかりません:', response.status);
+                // 代替URLを試す
+                const fallbackUrl = `/api/video/${jobId}/output.mp4?t=${timestamp}&cache=${randomStr}&nocache=true&v=8`;
+                setGeneratedVideo({
+                  ...resultWithTimestamp,
+                  videoUrl: fallbackUrl
+                });
+              }
+            })
+            .catch(error => {
+              console.error('動画ファイル確認エラー:', error);
+              setError('動画ファイルの確認中にエラーが発生しました');
+            });
         }, 1000)
       } else {
         // 記事生成（既存の文字起こし結果を使用）

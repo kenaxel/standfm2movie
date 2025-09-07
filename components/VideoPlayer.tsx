@@ -26,15 +26,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     // 完全に新しいURLを生成してキャッシュを回避
     const timestamp = Date.now();
     const randomStr = Math.random().toString(36).substring(2, 15);
-    const cacheBuster = `cache=${timestamp}-${randomStr}&nocache=true&t=${timestamp}&v=7`;
+    const cacheBuster = `cache=${timestamp}-${randomStr}&nocache=true&t=${timestamp}&v=8`;
     
     // URLを完全に新しい形式に変更
     let videoUrlWithCache;
     
-    // 元のURLをそのまま使用（キャッシュバスターのみ追加）
-    videoUrlWithCache = videoUrl.includes('?') 
-      ? `${videoUrl}&${cacheBuster}` 
-      : `${videoUrl}?${cacheBuster}`;
+    // 動画URLを直接指定（キャッシュ回避のため完全に新しいパスを使用）
+    if (videoUrl.includes('/api/video/')) {
+      const parts = videoUrl.split('/');
+      const jobId = parts[parts.length - 2];
+      // 直接public/outputからファイルを提供
+      videoUrlWithCache = `/output/${jobId}.mp4?${cacheBuster}`;
+    } else if (videoUrl.includes('/output/')) {
+      // 既にoutputパスの場合はそのまま使用
+      videoUrlWithCache = videoUrl.includes('?') 
+        ? `${videoUrl}&${cacheBuster}` 
+        : `${videoUrl}?${cacheBuster}`;
+    } else {
+      // その他の場合は元のURLにキャッシュバスターを追加
+      videoUrlWithCache = videoUrl.includes('?') 
+        ? `${videoUrl}&${cacheBuster}` 
+        : `${videoUrl}?${cacheBuster}`;
+    }
     
     console.log('VideoPlayer: 新しい動画URL:', videoUrlWithCache);
     setCachedVideoUrl(videoUrlWithCache)
@@ -246,7 +259,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               controls
               preload="auto"
               playsInline
-              crossOrigin="anonymous"
+              src={cachedVideoUrl}
+              type="video/mp4"
               onLoadStart={handleLoadStart}
               onCanPlay={handleCanPlay}
               onError={handleError}
@@ -254,10 +268,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onSuspend={() => console.log('動画の読み込みが中断されました')}
               onWaiting={() => console.log('動画がデータを待機中です')}
               onAbort={() => console.log('動画の読み込みが中止されました')}
-            >
-              <source src={cachedVideoUrl} type="video/mp4" />
-              お使いのブラウザは動画の再生に対応していません。
-            </video>
+            />
           )}
         </div>
         
