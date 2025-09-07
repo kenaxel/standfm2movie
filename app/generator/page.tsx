@@ -384,8 +384,8 @@ export default function GeneratorPage() {
         const timestamp = Date.now()
         const randomStr = Math.random().toString(36).substring(2, 15)
         
-        // 動画URLを完全に新しい形式に変更（ストリーミングAPIを使用）
-        const newVideoUrl = `/api/video-stream/${jobId}?t=${timestamp}&cache=${randomStr}&nocache=true&v=5`;
+        // 動画URLを完全に新しい形式に変更（直接ファイルを提供）
+        const newVideoUrl = `/output/${jobId}.mp4?t=${timestamp}&cache=${randomStr}&nocache=true&v=6`;
         
         const resultWithTimestamp = {
           ...videoResult.result,
