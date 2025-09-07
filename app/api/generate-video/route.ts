@@ -874,12 +874,20 @@ async function generateSubtitleVideo({
         }
       });
       
-      // 処理済みのセグメントからSRTを生成
-      processedTranscript.forEach((segment, index) => {
-        const startTime = formatSRTTime(segment.startTime)
-        const endTime = formatSRTTime(segment.endTime)
-        srtContent += `${index + 1}\n${startTime} --> ${endTime}\n${segment.text}\n\n`
-        console.log(`字幕セグメント ${index + 1}: ${startTime} --> ${endTime} | ${segment.text}`)
+      // 処理済みのセグメントからSRTを生成（重複チェック付き）
+      const usedTexts = new Set()
+      let segmentIndex = 1
+      
+      processedTranscript.forEach((segment) => {
+        // 同じテキストの重複を避ける
+        if (!usedTexts.has(segment.text.trim()) && segment.text.trim().length > 0) {
+          const startTime = formatSRTTime(segment.startTime)
+          const endTime = formatSRTTime(segment.endTime)
+          srtContent += `${segmentIndex}\n${startTime} --> ${endTime}\n${segment.text.trim()}\n\n`
+          console.log(`字幕セグメント ${segmentIndex}: ${startTime} --> ${endTime} | ${segment.text.trim()}`)
+          usedTexts.add(segment.text.trim())
+          segmentIndex++
+        }
       })
     } else {
       // 音声入力テキストを全体の字幕として使用
@@ -891,15 +899,15 @@ async function generateSubtitleVideo({
       console.log('テキスト言語判定:', isJapanese ? '日本語' : '英語');
       
       if (isJapanese) {
-        // 日本語テキストの場合：句読点で分割
+        // 日本語テキストの場合：句読点で分割し、適切な長さに調整
         const sentences = text.split(/[。！？]/).filter((s: string) => s.trim());
-        const segmentCount = Math.min(sentences.length, 30); // 最大30セグメント
-        const segmentDuration = audioDuration / Math.max(segmentCount, 1);
+        const maxSegments = Math.min(sentences.length, Math.floor(audioDuration / 3)); // 最低3秒間隔
+        const segmentDuration = audioDuration / Math.max(maxSegments, 1);
         
-        sentences.forEach((sentence: string, index: number) => {
-          if (index < 30 && sentence.trim()) { // 最大30セグメントまで
+        sentences.slice(0, maxSegments).forEach((sentence: string, index: number) => {
+          if (sentence.trim()) {
             const startTime = index * segmentDuration;
-            const endTime = (index + 1) * segmentDuration;
+            const endTime = Math.min((index + 1) * segmentDuration, audioDuration);
             srtContent += `${index + 1}\n${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n${sentence.trim()}\n\n`;
           }
         });
@@ -976,26 +984,25 @@ async function generateSubtitleVideo({
       }
       
       // 音声ファイルを追加
+      let hasAudio = false
       if (audioPath && fs.existsSync(audioPath)) {
         console.log('Adding audio track:', audioPath)
         ffmpegCommand.input(audioPath)
+        hasAudio = true
       }
       
-      // 字幕フィルターを追加（force_styleを削除してSRTの時間情報を尊重）
-      const subtitleFilter = `subtitles=${subtitlePath.replace(/\\/g, '\\\\').replace(/:/g, '\\:')}`
+      // 字幕フィルターを追加（エスケープ処理を改善）
+      const escapedSubtitlePath = subtitlePath.replace(/\\/g, '/').replace(/:/g, '\\:')
+      const subtitleFilter = `subtitles='${escapedSubtitlePath}':force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2,Shadow=1'`
       
       // 動画素材を使用する場合とそうでない場合でフィルターを分ける
-      const videoFilters = [`scale=${settings.resolution?.width || 1920}:${settings.resolution?.height || 1080}`]
+      const videoFilters = [`scale=${settings.resolution?.width || 1920}:${settings.resolution?.height || 1080}:force_original_aspect_ratio=decrease,pad=${settings.resolution?.width || 1920}:${settings.resolution?.height || 1080}:(ow-iw)/2:(oh-ih)/2`]
       
       // 静止画像の場合のみ動的効果を追加
       if (inputOptions.includes('-loop 1')) {
         videoFilters.push(
-          // 動的な視覚効果を追加
-          'zoompan=z=\'1+0.0005*on\':d=1:s=1920x1080',
-          // 色相の微妙な変化
-          'hue=h=sin(2*PI*t/15)*20',
-          // フェードイン効果
-          'fade=in:0:30'
+          // より控えめな動的効果
+          'zoompan=z=\'min(zoom+0.0002,1.3)\':d=1:s=1920x1080:fps=30'
         )
       }
       
@@ -1005,18 +1012,20 @@ async function generateSubtitleVideo({
       ffmpegCommand.videoFilters(videoFilters)
         .videoCodec('libx264')
         .fps(settings.fps || 30)
-        .outputOptions(['-pix_fmt yuv420p', '-preset fast', '-crf 28'])
+        .outputOptions(['-pix_fmt yuv420p', '-preset medium', '-crf 23'])
       
       // 音声がある場合は音声を統合
-      if (audioPath && fs.existsSync(audioPath)) {
+      if (hasAudio) {
         console.log('Integrating audio with video')
         ffmpegCommand
           .audioCodec('aac')
           .audioBitrate('128k')
-          .outputOptions(['-t', audioDuration.toString()])
+          .audioFrequency(44100)
+          .audioChannels(2)
+          .outputOptions(['-map', '0:v', '-map', '1:a', '-shortest'])
       } else {
         console.log('No audio file, creating silent video')
-        ffmpegCommand.outputOptions(['-t', audioDuration.toString()])
+        ffmpegCommand.outputOptions(['-an', '-t', audioDuration.toString()])
       }
       
       ffmpegCommand

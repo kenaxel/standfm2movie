@@ -44,6 +44,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       videoRef.current.load()
     }
     
+    // 5秒後に強制的にエラー状態をクリア（デバッグ用）
+    const forceLoadTimer = setTimeout(() => {
+      if (isLoading && videoRef.current) {
+        console.log('強制的に動画読み込みを再試行')
+        videoRef.current.load()
+      }
+    }, 5000)
+    
+    return () => {
+      clearTimeout(forceLoadTimer)
+    }
+    
     // 読み込みタイムアウトを設定
     const loadingTimeout = setTimeout(() => {
       if (isLoading) {
@@ -267,11 +279,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               ref={videoRef}
               className="w-full aspect-video"
               controls
-              preload="metadata"
+              preload="auto"
               playsInline
+              crossOrigin="anonymous"
               onLoadStart={handleLoadStart}
               onCanPlay={handleCanPlay}
               onError={handleError}
+              onLoadedData={() => {
+                console.log('動画データが読み込まれました')
+                setIsLoading(false)
+              }}
+              onLoadedMetadata={() => {
+                console.log('動画メタデータが読み込まれました')
+                if (videoRef.current) {
+                  console.log('動画の長さ:', videoRef.current.duration, '秒')
+                }
+              }}
               onStalled={() => console.log('動画の読み込みが停止しました')}
               onSuspend={() => console.log('動画の読み込みが中断されました')}
               onWaiting={() => console.log('動画がデータを待機中です')}
