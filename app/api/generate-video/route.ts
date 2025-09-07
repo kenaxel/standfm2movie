@@ -1359,7 +1359,7 @@ export async function POST(request: NextRequest) {
     
     // 音声を字幕として表示する動画生成
     const audioText = typeof audioInput === 'string' ? audioInput : (typeof audioInput.source === 'string' ? audioInput.source : '')
-    outputPath = await generateSubtitleVideo({
+    const tempVideoPath = await generateSubtitleVideo({
       audioPath: audioPath || '',
       audioInput: audioText,
       transcript: transcriptWithTimestamps.length > 0 ? transcriptWithTimestamps : (processedTranscript || []),
@@ -1368,6 +1368,14 @@ export async function POST(request: NextRequest) {
       timeline: timelineResult,
       audioDuration
     })
+    
+    // 生成された動画を正しい出力パスにコピー
+    if (fs.existsSync(tempVideoPath)) {
+      await fs.promises.copyFile(tempVideoPath, outputPath)
+      console.log('動画ファイルを出力ディレクトリにコピー:', tempVideoPath, '->', outputPath)
+    } else {
+      throw new Error('一時動画ファイルが見つかりません: ' + tempVideoPath)
+    }
     
     // 動画ファイルが生成されたか確認
     if (fs.existsSync(outputPath)) {

@@ -164,12 +164,33 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const handleError = (e: any) => {
     console.error('動画読み込みエラー:', e);
     setIsLoading(false);
-    setError('動画の読み込みに失敗しました。再読み込みしてください。');
     
     // エラーの詳細をログに出力
-    if (videoRef.current) {
-      console.error('ビデオエラーコード:', videoRef.current.error?.code);
-      console.error('ビデオエラーメッセージ:', videoRef.current.error?.message);
+    if (videoRef.current && videoRef.current.error) {
+      const errorCode = videoRef.current.error.code;
+      const errorMessage = videoRef.current.error.message;
+      console.error('ビデオエラーコード:', errorCode);
+      console.error('ビデオエラーメッセージ:', errorMessage);
+      
+      // エラーコードに応じたメッセージを表示
+      switch (errorCode) {
+        case 1: // MEDIA_ERR_ABORTED
+          setError('動画の読み込みが中断されました。');
+          break;
+        case 2: // MEDIA_ERR_NETWORK
+          setError('ネットワークエラーが発生しました。');
+          break;
+        case 3: // MEDIA_ERR_DECODE
+          setError('動画ファイルの形式に問題があります。');
+          break;
+        case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
+          setError('動画ファイルが見つからないか、サポートされていない形式です。');
+          break;
+        default:
+          setError('動画の読み込みに失敗しました。ファイルが存在しない可能性があります。');
+      }
+    } else {
+      setError('動画の読み込みに失敗しました。ファイルが存在しない可能性があります。');
     }
   }
 
@@ -207,6 +228,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <p>{error}</p>
+                <button
+                  onClick={() => {
+                    setError(null)
+                    setIsLoading(true)
+                    // 動画URLを再試行
+                    const timestamp = Date.now()
+                    const newUrl = videoUrl.split('?')[0] + `?retry=${timestamp}`
+                    setCachedVideoUrl(newUrl)
+                  }}
+                  className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  再試行
+                </button>
               </div>
             </div>
           ) : (
