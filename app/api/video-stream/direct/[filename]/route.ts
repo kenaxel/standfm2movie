@@ -34,72 +34,29 @@ export async function GET(
     const stat = await fsPromises.stat(videoPath);
     const fileSize = stat.size;
     
-    // Range リクエストのサポート
-    const range = request.headers.get('range');
-    
-    if (range) {
-      // Range リクエストの処理
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-      const chunkSize = (end - start) + 1;
-      
-      console.log(`Range リクエスト: ${start}-${end}/${fileSize}`);
-      
-      // ファイルの一部を読み込む
-      const fileStream = createReadStream(videoPath, { start, end });
-      const chunks: Buffer[] = [];
-      
-      for await (const chunk of fileStream) {
-        chunks.push(Buffer.from(chunk));
-      }
-      
-      const buffer = Buffer.concat(chunks);
+    try {
+      // 直接ファイルを返す（ストリーミングではなく）
+      const videoBuffer = await fsPromises.readFile(videoPath);
       
       // レスポンスヘッダーを設定
       const headers = new Headers();
       headers.set('Content-Type', 'video/mp4');
-      headers.set('Content-Range', `bytes ${start}-${end}/${fileSize}`);
-      headers.set('Accept-Ranges', 'bytes');
-      headers.set('Content-Length', chunkSize.toString());
-      headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-      headers.set('Pragma', 'no-cache');
-      headers.set('Expires', '0');
-      
-      // 部分的なコンテンツを返す
-      return new NextResponse(buffer, {
-        status: 206,
-        headers
-      });
-    } else {
-      // 通常のリクエストの処理
-      // 小さなチャンクサイズを設定
-      const CHUNK_SIZE = 1024 * 1024; // 1MB
-      
-      // 最初のチャンクだけを返す
-      const fileStream = createReadStream(videoPath, { start: 0, end: CHUNK_SIZE - 1 });
-      const chunks: Buffer[] = [];
-      
-      for await (const chunk of fileStream) {
-        chunks.push(Buffer.from(chunk));
-      }
-      
-      const buffer = Buffer.concat(chunks);
-      
-      // レスポンスヘッダーを設定
-      const headers = new Headers();
-      headers.set('Content-Type', 'video/mp4');
-      headers.set('Content-Length', Math.min(CHUNK_SIZE, fileSize).toString());
+      headers.set('Content-Length', stat.size.toString());
       headers.set('Accept-Ranges', 'bytes');
       headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       headers.set('Pragma', 'no-cache');
       headers.set('Expires', '0');
+      headers.set('Access-Control-Allow-Origin', '*');
+      headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
       
-      // 最初のチャンクを返す
-      return new NextResponse(buffer, {
+      // 動画ファイルを返す
+      return new NextResponse(videoBuffer, {
         status: 200,
         headers
       });
+    } catch (readError) {
+      console.error('ファイル読み込みエラー:', readError);
+      return new NextResponse('ファイルの読み込みに失敗しました', { status: 500 });
     }
   } catch (error) {
     console.error('動画ストリーミングエラー:', error);
