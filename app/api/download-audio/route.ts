@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
 import fetch from 'node-fetch';
 
 // 音声URLをダウンロードして一時ファイルとして保存するAPI
@@ -36,8 +35,8 @@ export async function POST(request: NextRequest) {
       throw new Error(`ダウンロードに失敗しました: ${response.status} ${response.statusText}`);
     }
     
-    // ファイル名を生成
-    const uniqueId = uuidv4();
+    // ファイル名を生成（uuidの代わりにランダム文字列を使用）
+    const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
     const contentType = response.headers.get('content-type') || '';
     const fileExt = contentType.includes('audio/mpeg') ? '.mp3' : 
                     contentType.includes('audio/wav') ? '.wav' : 

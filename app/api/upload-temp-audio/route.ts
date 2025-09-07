@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
 
 // 一時的な音声ファイルをアップロードするAPI
 export async function POST(request: NextRequest) {
@@ -27,9 +26,9 @@ export async function POST(request: NextRequest) {
       console.error('ディレクトリ作成エラー:', err);
     }
     
-    // ファイル名を生成
+    // ファイル名を生成（uuidの代わりにランダム文字列を使用）
     const fileExt = path.extname(file.name);
-    const uniqueId = uuidv4();
+    const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
     const fileName = `audio-${Date.now()}-${uniqueId}${fileExt}`;
     const filePath = path.join(tempDir, fileName);
     
