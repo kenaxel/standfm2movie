@@ -10,13 +10,43 @@ export async function GET(
     const filename = params.filename
     const filePath = path.join(process.cwd(), 'public', 'output', filename)
     
-    console.log('動画ファイル配信要求:', filename, 'パス:', filePath)
+    console.log('動画ファイル配信要求:', {
+      filename,
+      filePath,
+      cwd: process.cwd(),
+      requestUrl: request.url
+    })
+    
+    // 出力ディレクトリの存在確認
+    const outputDir = path.join(process.cwd(), 'public', 'output')
+    if (!fs.existsSync(outputDir)) {
+      console.error('出力ディレクトリが存在しません:', outputDir)
+      return NextResponse.json(
+        { error: '出力ディレクトリが見つかりません' },
+        { status: 404 }
+      )
+    }
+    
+    // ディレクトリの内容を確認
+    const dirContents = fs.readdirSync(outputDir)
+    console.log('出力ディレクトリの内容:', dirContents)
     
     // ファイルの存在確認
     if (!fs.existsSync(filePath)) {
-      console.error('動画ファイルが見つかりません:', filePath)
+      console.error('動画ファイルが見つかりません:', {
+        filePath,
+        dirContents,
+        requestedFilename: filename
+      })
       return NextResponse.json(
-        { error: 'ファイルが見つかりません' },
+        { 
+          error: 'ファイルが見つかりません',
+          details: {
+            requestedFile: filename,
+            availableFiles: dirContents,
+            searchPath: filePath
+          }
+        },
         { status: 404 }
       )
     }

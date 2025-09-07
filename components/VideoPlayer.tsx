@@ -36,17 +36,56 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     console.log('VideoPlayer: 動画URL:', videoUrlWithCache);
     setCachedVideoUrl(videoUrlWithCache)
     
-    // ファイルの存在確認
+    // ファイルの存在確認を詳細に実行
     const checkFileExists = async () => {
       try {
+        console.log('動画ファイル存在確認開始:', videoUrlWithCache)
+        
+        // まず元のURLで確認
         const response = await fetch(videoUrlWithCache, { method: 'HEAD' })
+        console.log('HEAD リクエスト結果:', {
+          url: videoUrlWithCache,
+          status: response.status,
+          statusText: response.statusText,
+          headers: Object.fromEntries(response.headers.entries())
+        })
+        
         if (!response.ok) {
           console.error('動画ファイルが見つかりません:', response.status, response.statusText)
-          setError(`動画ファイルが見つかりません (${response.status})`)
-          setIsLoading(false)
-          return
+          
+          // 代替パスを試す
+          const alternativePaths = [
+            videoUrl.replace('/api/output/', '/output/'),
+            videoUrl.replace('/api/output/', '/api/video/direct/'),
+            videoUrl
+          ]
+          
+          console.log('代替パスを試行:', alternativePaths)
+          
+          let foundAlternative = false
+          for (const altPath of alternativePaths) {
+            try {
+              const altResponse = await fetch(altPath, { method: 'HEAD' })
+              console.log('代替パス確認:', altPath, altResponse.status)
+              if (altResponse.ok) {
+                console.log('代替パスで動画ファイルを発見:', altPath)
+                setCachedVideoUrl(altPath + (altPath.includes('?') ? '&' : '?') + `t=${Date.now()}`)
+                foundAlternative = true
+                break
+              }
+            } catch (altError) {
+              console.log('代替パスエラー:', altPath, altError)
+            }
+          }
+          
+          if (!foundAlternative) {
+            setError(`動画ファイルが見つかりません (${response.status})`)
+            setIsLoading(false)
+            return
+          }
+        } else {
+          console.log('動画ファイルの存在を確認:', response.status)
         }
-        console.log('動画ファイルの存在を確認:', response.status)
       } catch (error) {
         console.error('動画ファイル確認エラー:', error)
         setError('動画ファイルの確認中にエラーが発生しました')

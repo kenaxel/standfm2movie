@@ -1373,7 +1373,21 @@ export async function POST(request: NextRequest) {
     if (fs.existsSync(tempVideoPath)) {
       await fs.promises.copyFile(tempVideoPath, outputPath)
       console.log('動画ファイルを出力ディレクトリにコピー:', tempVideoPath, '->', outputPath)
+      
+      // コピー後のファイル確認
+      if (fs.existsSync(outputPath)) {
+        const stats = await fs.promises.stat(outputPath)
+        console.log('コピー後のファイル確認:', {
+          path: outputPath,
+          size: stats.size,
+          exists: true
+        })
+      } else {
+        console.error('コピー後にファイルが見つかりません:', outputPath)
+      }
     } else {
+      console.error('一時動画ファイルが見つかりません:', tempVideoPath)
+      console.log('一時ディレクトリの内容:', fs.readdirSync(tempDir))
       throw new Error('一時動画ファイルが見つかりません: ' + tempVideoPath)
     }
     
@@ -1381,8 +1395,18 @@ export async function POST(request: NextRequest) {
     if (fs.existsSync(outputPath)) {
       const stats = await fs.promises.stat(outputPath)
       fileSize = stats.size
-      console.log('Video file generated successfully:', outputPath, 'Size:', fileSize)
+      console.log('Video file generated successfully:', {
+        path: outputPath,
+        size: fileSize,
+        sizeInMB: (fileSize / 1024 / 1024).toFixed(2) + ' MB'
+      })
+      
+      // public/outputディレクトリの内容も確認
+      const outputDir = path.dirname(outputPath)
+      const outputFiles = fs.readdirSync(outputDir)
+      console.log('出力ディレクトリの内容:', outputFiles)
     } else {
+      console.error('最終的な動画ファイルが見つかりません:', outputPath)
       throw new Error('動画ファイルの生成に失敗しました')
     }
     
