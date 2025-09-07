@@ -1374,21 +1374,10 @@ export async function POST(request: NextRequest) {
     
     // 音声を字幕として表示する動画生成
     const audioText = typeof audioInput === 'string' ? audioInput : (typeof audioInput.source === 'string' ? audioInput.source : '')
-    const tempVideoPath = await generateSubtitleVideo({
-      audioPath: audioPath || '',
-      audioInput: audioText,
-      transcript: transcriptWithTimestamps.length > 0 ? transcriptWithTimestamps : (processedTranscript || []),
-      settings,
-      tempDir,
-      timeline: timelineResult,
-      audioDuration
-    })
     
-    // generateSubtitleVideoは一時ディレクトリに動画を生成するので、
-    // 正しい出力パスに直接生成するように変更
-    console.log('動画生成を正しい出力パスで実行:', outputPath)
+    console.log('動画生成を開始:', outputPath)
     
-    // 一時動画パスではなく、直接最終出力パスを使用
+    // 直接最終出力パスに動画を生成
     const finalVideoPath = await generateSubtitleVideo({
       audioPath: audioPath || '',
       audioInput: audioText,
