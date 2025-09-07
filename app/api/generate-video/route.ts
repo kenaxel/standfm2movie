@@ -1386,8 +1386,8 @@ export async function POST(request: NextRequest) {
       throw new Error('動画ファイルの生成に失敗しました')
     }
     
-    // 公開用パスを生成
-    const publicVideoPath = `/output/${jobId}.mp4`
+    // 公開用パスを生成（APIルート経由）
+    const publicVideoPath = `/api/output/${jobId}.mp4`
     
     result = {
       videoUrl: publicVideoPath,

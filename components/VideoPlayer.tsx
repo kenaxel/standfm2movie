@@ -36,6 +36,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     console.log('VideoPlayer: 動画URL:', videoUrlWithCache);
     setCachedVideoUrl(videoUrlWithCache)
     
+    // ファイルの存在確認
+    const checkFileExists = async () => {
+      try {
+        const response = await fetch(videoUrlWithCache, { method: 'HEAD' })
+        if (!response.ok) {
+          console.error('動画ファイルが見つかりません:', response.status, response.statusText)
+          setError(`動画ファイルが見つかりません (${response.status})`)
+          setIsLoading(false)
+          return
+        }
+        console.log('動画ファイルの存在を確認:', response.status)
+      } catch (error) {
+        console.error('動画ファイル確認エラー:', error)
+        setError('動画ファイルの確認中にエラーが発生しました')
+        setIsLoading(false)
+      }
+    }
+    
+    checkFileExists()
+    
     // 読み込みタイムアウトを設定
     const loadingTimeout = setTimeout(() => {
       if (isLoading) {
@@ -229,13 +249,29 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 </svg>
                 <p>{error}</p>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     setError(null)
                     setIsLoading(true)
+                    
                     // 動画URLを再試行
                     const timestamp = Date.now()
                     const newUrl = videoUrl.split('?')[0] + `?retry=${timestamp}`
                     setCachedVideoUrl(newUrl)
+                    
+                    // ファイルの存在を再確認
+                    try {
+                      const response = await fetch(newUrl, { method: 'HEAD' })
+                      if (!response.ok) {
+                        setError(`動画ファイルが見つかりません (${response.status})`)
+                        setIsLoading(false)
+                      } else {
+                        console.log('再試行: 動画ファイルの存在を確認')
+                      }
+                    } catch (error) {
+                      console.error('再試行時のファイル確認エラー:', error)
+                      setError('動画ファイルの確認中にエラーが発生しました')
+                      setIsLoading(false)
+                    }
                   }}
                   className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
                 >
