@@ -365,8 +365,10 @@ export default function GeneratorPage() {
 
         console.log('動画生成結果:', videoResult)
         
-        // 結果を直接設定
-        setGeneratedVideo(videoResult.result)
+        // 結果を設定（少し遅延を入れてファイルが確実に配置されるのを待つ）
+        setTimeout(() => {
+          setGeneratedVideo(videoResult.result)
+        }, 1000)
       } else {
         // 記事生成（既存の文字起こし結果を使用）
         console.log('記事生成開始:', { transcript: currentTranscript.substring(0, 100) + '...', settings })

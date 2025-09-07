@@ -26,7 +26,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     
     // 動画要素に直接URLを設定
     if (videoRef.current) {
-      videoRef.current.src = videoUrl
+      // キャッシュバスターを追加
+      const timestamp = Date.now()
+      const urlWithCache = videoUrl.includes('?') 
+        ? `${videoUrl}&t=${timestamp}` 
+        : `${videoUrl}?t=${timestamp}`
+      
+      videoRef.current.src = urlWithCache
       videoRef.current.load()
     }
   }, [videoUrl])
@@ -90,14 +96,43 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setIsLoading(true)
     
     if (videoRef.current) {
-      // キャッシュバスターを追加して再試行
+      // 複数のパスを試行
       const timestamp = Date.now()
-      const urlWithCache = videoUrl.includes('?') 
-        ? `${videoUrl}&retry=${timestamp}` 
-        : `${videoUrl}?retry=${timestamp}`
+      const pathsToTry = [
+        videoUrl.replace('/output/', '/api/output/'),
+        videoUrl,
+        videoUrl.replace('/api/output/', '/output/')
+      ]
       
-      videoRef.current.src = urlWithCache
-      videoRef.current.load()
+      let currentPathIndex = 0
+      
+      const tryNextPath = () => {
+        if (currentPathIndex >= pathsToTry.length) {
+          setError('すべてのパスで動画ファイルが見つかりませんでした')
+          setIsLoading(false)
+          return
+        }
+        
+        const currentPath = pathsToTry[currentPathIndex]
+        const urlWithCache = currentPath.includes('?') 
+          ? `${currentPath}&retry=${timestamp}` 
+          : `${currentPath}?retry=${timestamp}`
+        
+        console.log('試行中のパス:', urlWithCache)
+        
+        videoRef.current!.src = urlWithCache
+        videoRef.current!.load()
+        
+        // 3秒後に次のパスを試行
+        setTimeout(() => {
+          if (isLoading) {
+            currentPathIndex++
+            tryNextPath()
+          }
+        }, 3000)
+      }
+      
+      tryNextPath()
     }
   }
 
@@ -139,12 +174,20 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               ref={videoRef}
               className="w-full aspect-video"
               controls
-              preload="metadata"
+              preload="auto"
               playsInline
+              crossOrigin="anonymous"
               onLoadStart={handleLoadStart}
               onCanPlay={handleCanPlay}
               onLoadedData={handleLoadedData}
               onError={handleError}
+              onLoadedMetadata={() => {
+                console.log('動画メタデータ読み込み完了')
+                if (videoRef.current) {
+                  console.log('動画の長さ:', videoRef.current.duration, '秒')
+                }
+                setIsLoading(false)
+              }}
             >
               お使いのブラウザは動画の再生をサポートしていません。
             </video>

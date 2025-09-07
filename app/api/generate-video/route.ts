@@ -1431,13 +1431,23 @@ export async function POST(request: NextRequest) {
       try {
         await fs.promises.copyFile(outputPath, publicOutputPath)
         console.log('動画ファイルをpublic/outputにコピー:', publicOutputPath)
+        
+        // コピー後のファイル確認
+        if (fs.existsSync(publicOutputPath)) {
+          const stats = await fs.promises.stat(publicOutputPath)
+          console.log('public/outputにコピー完了:', {
+            path: publicOutputPath,
+            size: stats.size,
+            sizeInMB: (stats.size / 1024 / 1024).toFixed(2) + ' MB'
+          })
+        }
       } catch (copyError) {
         console.error('public/outputへのコピーに失敗:', copyError)
       }
     }
     
-    // 静的ファイルパスを使用（Next.jsの静的ファイル配信）
-    const publicVideoPath = `/output/${jobId}.mp4`
+    // APIルート経由のパスを使用（より確実）
+    const publicVideoPath = `/api/output/${jobId}.mp4`
     
     result = {
       videoUrl: publicVideoPath,
