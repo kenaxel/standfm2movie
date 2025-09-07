@@ -78,6 +78,9 @@ export async function GET(
       headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       headers.set('Pragma', 'no-cache');
       headers.set('Expires', '0');
+      headers.set('Access-Control-Allow-Origin', '*');
+      headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+      headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
       
       // 動画ファイルを返す
       return new NextResponse(videoBuffer, {
