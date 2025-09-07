@@ -164,34 +164,65 @@ export default function GeneratorPage() {
         // 毎回新しい音声入力オブジェクトを作成してキャッシュを回避
         if (audioSource && audioSource.type === 'file' && audioSource.source instanceof File) {
           const file = audioSource.source as File
-          const arrayBuffer = await file.arrayBuffer()
-          const uint8Array = new Uint8Array(arrayBuffer)
-          const binaryString = Array.from(uint8Array).map(byte => String.fromCharCode(byte)).join('')
-          const base64 = btoa(binaryString)
+          
+          // FormDataを使用して直接ファイルを送信する準備
+          const formData = new FormData()
+          formData.append('audioFile', file)
+          
+          // 一時的にファイルをアップロードして処理
+          console.log('音声ファイルを一時アップロード中...')
+          const uploadResponse = await fetch('/api/upload-temp-audio', {
+            method: 'POST',
+            body: formData
+          })
+          
+          if (!uploadResponse.ok) {
+            throw new Error('音声ファイルのアップロードに失敗しました')
+          }
+          
+          const uploadResult = await uploadResponse.json()
+          
           audioInputForVideo = {
-            type: 'file',
-            data: base64,
+            type: 'tempFile',
+            path: uploadResult.filePath,
+            originalName: file.name,
             format: file.name.split('.').pop() || 'mp3',
-            filename: file.name,
-            timestamp: Date.now() // キャッシュ回避用タイムスタンプ
+            size: file.size,
+            uniqueId: `${Date.now()}-${Math.random().toString(36).substring(2)}`,
+            timestamp: Date.now()
           }
         } else if (audioSource && audioSource.type === 'url') {
-          // URLの場合、キャッシュを回避するためのパラメータを追加
+          // URLの場合、サーバー側でダウンロードして処理するように変更
           const sourceUrl = audioSource.source;
-          const urlWithCache = sourceUrl.includes('?') 
-            ? `${sourceUrl}&cache=${Date.now()}` 
-            : `${sourceUrl}?cache=${Date.now()}`;
-      
+          
+          console.log('音声URLを処理中...')
+          const downloadResponse = await fetch('/api/download-audio', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              url: sourceUrl,
+              uniqueId: `${Date.now()}-${Math.random().toString(36).substring(2)}`
+            })
+          })
+          
+          if (!downloadResponse.ok) {
+            throw new Error('音声URLの処理に失敗しました')
+          }
+          
+          const downloadResult = await downloadResponse.json()
+          
           audioInputForVideo = {
-            type: 'url',
-            source: urlWithCache,
-            originalSource: sourceUrl,
-            timestamp: Date.now() // キャッシュ回避用タイムスタンプ
+            type: 'tempFile',
+            path: downloadResult.filePath,
+            originalUrl: sourceUrl,
+            uniqueId: downloadResult.uniqueId,
+            timestamp: Date.now()
           }
         } else {
           audioInputForVideo = {
             ...audioSource,
-            timestamp: Date.now() // キャッシュ回避用タイムスタンプ
+            uniqueId: `${Date.now()}-${Math.random().toString(36).substring(2)}`,
+            timestamp: Date.now()
           }
         }
         
@@ -254,19 +285,32 @@ export default function GeneratorPage() {
         const allKeywords = extractMainKeywords(currentTranscript);
         console.log('抽出された主要キーワード:', allKeywords);
         
+        // 新しいジョブIDを生成
+        const jobId = `job-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+        
+        console.log(`動画生成ジョブを開始: ${jobId}`);
+        
+        // 動画生成リクエストを送信
         const videoResponse = await fetch('/api/generate-video', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            jobId,
             audioInput: audioInputForVideo,
             settings: videoSettings,
             transcript: transcriptSegments,
-            keywords: allKeywords, // 全体のキーワードを追加
-            contentType: detectContentType(currentTranscript), // コンテンツタイプを検出
+            keywords: allKeywords,
+            contentType: detectContentType(currentTranscript),
             cacheBreaker: uniqueCacheBreaker,
             forceRefresh: true,
             timestamp: Date.now(),
-            preventCache: Math.random().toString(36).substring(2)
+            preventCache: Math.random().toString(36).substring(2),
+            // 追加のメタデータ
+            meta: {
+              clientTimestamp: Date.now(),
+              clientId: `client-${Math.random().toString(36).substring(2)}`,
+              sessionId: `session-${Math.random().toString(36).substring(2)}`
+            }
           })
         })
         
@@ -339,19 +383,32 @@ export default function GeneratorPage() {
         // 動画URLにタイムスタンプパラメータを追加してキャッシュを回避
         const timestamp = Date.now()
         const randomStr = Math.random().toString(36).substring(2, 15)
+        
+        // 動画URLを完全に新しい形式に変更
+        const newVideoUrl = `/api/video/${jobId}/output.mp4?t=${timestamp}&cache=${randomStr}&nocache=true&v=2`;
+        
         const resultWithTimestamp = {
           ...videoResult.result,
-          videoUrl: `${videoResult.result.videoUrl}?t=${timestamp}&cache=${randomStr}&nocache=true`
+          videoUrl: newVideoUrl,
+          jobId: jobId
         }
         
-        console.log('新しい動画URL:', resultWithTimestamp.videoUrl)
+        console.log('新しい動画URL:', newVideoUrl)
         
         // 古い動画の状態をクリアしてから新しい動画を設定
         setGeneratedVideo(null)
+        
         // 少し待ってから新しい動画を設定（DOMの更新を確実にするため）
         setTimeout(() => {
           setGeneratedVideo(resultWithTimestamp)
-        }, 300)
+        }, 500)
+        
+        // さらに遅延させて動画要素を強制的に更新
+        setTimeout(() => {
+          if (videoRef.current) {
+            videoRef.current.load();
+          }
+        }, 1000)
       } else {
         // 記事生成（既存の文字起こし結果を使用）
         console.log('記事生成開始:', { transcript: currentTranscript.substring(0, 100) + '...', settings })

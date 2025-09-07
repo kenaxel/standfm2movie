@@ -26,54 +26,93 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     // 完全に新しいURLを生成してキャッシュを回避
     const timestamp = Date.now();
     const randomStr = Math.random().toString(36).substring(2, 15);
-    const cacheBuster = `cache=${timestamp}-${randomStr}&nocache=true&t=${timestamp}`;
-    const videoUrlWithCache = videoUrl.includes('?') 
-      ? `${videoUrl}&${cacheBuster}` 
-      : `${videoUrl}?${cacheBuster}`;
+    const cacheBuster = `cache=${timestamp}-${randomStr}&nocache=true&t=${timestamp}&v=3`;
+    
+    // URLを完全に新しい形式に変更
+    let videoUrlWithCache;
+    
+    if (videoUrl.includes('/api/video/')) {
+      // 既にAPI形式のURLの場合
+      videoUrlWithCache = videoUrl.includes('?') 
+        ? `${videoUrl}&${cacheBuster}` 
+        : `${videoUrl}?${cacheBuster}`;
+    } else {
+      // 古い形式のURLの場合は新しい形式に変換
+      const urlParts = videoUrl.split('/');
+      const fileName = urlParts[urlParts.length - 1].split('?')[0];
+      const newBaseUrl = `/api/video/direct/${fileName}`;
+      videoUrlWithCache = `${newBaseUrl}?${cacheBuster}`;
+    }
     
     console.log('VideoPlayer: 新しいキャッシュバスター付きURL:', videoUrlWithCache);
     setCachedVideoUrl(videoUrlWithCache)
     
     // 既存のビデオ要素を完全にクリア
     if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.removeAttribute('src');
-      
-      // すべてのsource要素を削除
-      while (videoRef.current.firstChild) {
-        videoRef.current.removeChild(videoRef.current.firstChild);
-      }
-      
-      videoRef.current.load();
-    }
-    
-    // 少し遅延させてから新しいURLを設定（より長い遅延）
-    const timer = setTimeout(() => {
-      if (videoRef.current) {
-        // 新しいsource要素を作成
-        const source = document.createElement('source');
-        source.src = videoUrlWithCache;
-        source.type = 'video/mp4';
+      try {
+        videoRef.current.pause();
+        videoRef.current.currentTime = 0;
+        videoRef.current.removeAttribute('src');
         
-        // 古いsource要素を削除
+        // すべてのsource要素を削除
         while (videoRef.current.firstChild) {
           videoRef.current.removeChild(videoRef.current.firstChild);
         }
         
-        // 新しいsource要素を追加
-        videoRef.current.appendChild(source);
+        // ブラウザキャッシュをクリアするためのハック
+        videoRef.current.innerHTML = '';
         videoRef.current.load();
         
-        // 読み込み後に再生を試みる
-        videoRef.current.oncanplay = () => {
-          try {
-            videoRef.current?.play().catch(e => console.log('自動再生できませんでした:', e));
-          } catch (e) {
-            console.log('再生エラー:', e);
-          }
-        };
+        // メモリ解放を促進
+        URL.revokeObjectURL(videoRef.current.src);
+      } catch (e) {
+        console.error('ビデオ要素のクリア中にエラー:', e);
       }
-    }, 300);
+    }
+    
+    // より長い遅延を設定して確実にDOMが更新されるようにする
+    const timer = setTimeout(() => {
+      if (videoRef.current) {
+        try {
+          // 新しいsource要素を作成
+          const source = document.createElement('source');
+          source.src = videoUrlWithCache;
+          source.type = 'video/mp4';
+          
+          // 古いsource要素を削除
+          while (videoRef.current.firstChild) {
+            videoRef.current.removeChild(videoRef.current.firstChild);
+          }
+          
+          // 新しいsource要素を追加
+          videoRef.current.appendChild(source);
+          
+          // 明示的にブラウザに再読み込みを指示
+          videoRef.current.load();
+          
+          console.log('ビデオ要素を再構築しました:', videoUrlWithCache);
+          
+          // 読み込み後に再生を試みる
+          videoRef.current.oncanplay = () => {
+            try {
+              console.log('ビデオが再生可能になりました');
+              videoRef.current?.play().catch(e => console.log('自動再生できませんでした:', e));
+            } catch (e) {
+              console.log('再生エラー:', e);
+            }
+          };
+          
+          // エラーハンドリングを追加
+          videoRef.current.onerror = (e) => {
+            console.error('ビデオ読み込みエラー:', e);
+            setError('動画の読み込みに失敗しました。再読み込みしてください。');
+          };
+        } catch (e) {
+          console.error('ビデオ要素の更新中にエラー:', e);
+          setError('動画の設定中にエラーが発生しました');
+        }
+      }
+    }, 500);
     
     return () => {
       clearTimeout(timer);
