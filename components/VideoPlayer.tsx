@@ -16,8 +16,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
-
-  // videoUrlが変更された時にプレイヤーをリセット
+  const [cachedVideoUrl, setCachedVideoUrl] = useState<string>('')
+  
+  // videoUrlが変更された時だけ新しいキャッシュバスター付きURLを生成
   useEffect(() => {
     setIsLoading(true)
     setError(null)
@@ -28,27 +29,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       ? `${videoUrl}&${cacheBuster}` 
       : `${videoUrl}?${cacheBuster}`;
     
+    setCachedVideoUrl(videoUrlWithCache)
+    
     if (videoRef.current) {
-      // 動画要素を完全にリセット
-      const videoElement = videoRef.current;
-      
-      // 既存のsource要素を削除
-      while (videoElement.firstChild) {
-        videoElement.removeChild(videoElement.firstChild);
-      }
-      
-      // 新しいsource要素を作成
-      const source = document.createElement('source');
-      source.src = videoUrlWithCache;
-      source.type = 'video/mp4';
-      
-      // source要素を追加
-      videoElement.appendChild(source);
-      
       // 動画を再読み込み
-      videoElement.load();
+      videoRef.current.load();
     }
-  }, [videoUrl])
+  }, [videoUrl]) // videoUrlが変わった時だけ実行
 
   const handleLoadStart = () => {
     setIsLoading(true)
@@ -110,7 +97,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onCanPlay={handleCanPlay}
               onError={handleError}
             >
-              <source src={`${videoUrl}?t=${Date.now()}&r=${Math.random()}`} type="video/mp4" />
+              {cachedVideoUrl && <source src={cachedVideoUrl} type="video/mp4" />}
               お使いのブラウザは動画の再生に対応していません。
             </video>
           )}
