@@ -1413,11 +1413,28 @@ export async function POST(request: NextRequest) {
       throw new Error('動画ファイルの生成に失敗しました')
     }
     
-    // 公開用パスを生成（APIルート経由）
+    // 複数の公開用パスを生成（フォールバック用）
     const publicVideoPath = `/api/output/${jobId}.mp4`
+    const directVideoPath = `/output/${jobId}.mp4`
+    
+    // ファイルが実際に存在するかを確認してパスを決定
+    let finalVideoUrl = publicVideoPath
+    
+    // 静的ファイルとしてもアクセス可能にするため、public/outputに確実に配置
+    const publicOutputPath = path.join(process.cwd(), 'public', 'output', `${jobId}.mp4`)
+    if (outputPath !== publicOutputPath) {
+      try {
+        await fs.promises.copyFile(outputPath, publicOutputPath)
+        console.log('動画ファイルをpublic/outputにもコピー:', publicOutputPath)
+        finalVideoUrl = directVideoPath // 静的ファイルパスを優先
+      } catch (copyError) {
+        console.error('public/outputへのコピーに失敗:', copyError)
+        // APIルート経由のパスを使用
+      }
+    }
     
     result = {
-      videoUrl: publicVideoPath,
+      videoUrl: finalVideoUrl,
       thumbnailUrl: videoAssets[0]?.url || 'https://via.placeholder.com/1280x720/0066cc/ffffff?text=Generated+Video',
       duration: audioDuration,
       format: settings.format,

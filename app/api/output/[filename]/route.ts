@@ -31,10 +31,29 @@ export async function GET(
     const dirContents = fs.readdirSync(outputDir)
     console.log('出力ディレクトリの内容:', dirContents)
     
-    // ファイルの存在確認
-    if (!fs.existsSync(filePath)) {
+    // ファイルの存在確認（複数の場所を検索）
+    let actualFilePath = filePath
+    let fileFound = false
+    
+    // 複数の場所を検索
+    const searchPaths = [
+      filePath,
+      path.join(process.cwd(), 'public', 'output', filename),
+      path.join(outputDir, filename)
+    ]
+    
+    for (const searchPath of searchPaths) {
+      if (fs.existsSync(searchPath)) {
+        actualFilePath = searchPath
+        fileFound = true
+        console.log('動画ファイルを発見:', searchPath)
+        break
+      }
+    }
+    
+    if (!fileFound) {
       console.error('動画ファイルが見つかりません:', {
-        filePath,
+        searchPaths,
         dirContents,
         requestedFilename: filename
       })
@@ -44,7 +63,7 @@ export async function GET(
           details: {
             requestedFile: filename,
             availableFiles: dirContents,
-            searchPath: filePath
+            searchPaths: searchPaths
           }
         },
         { status: 404 }
@@ -52,13 +71,13 @@ export async function GET(
     }
     
     // ファイル情報を取得
-    const stats = fs.statSync(filePath)
+    const stats = fs.statSync(actualFilePath)
     const fileSize = stats.size
     
-    console.log('動画ファイル情報:', { filename, size: fileSize, path: filePath })
+    console.log('動画ファイル情報:', { filename, size: fileSize, path: actualFilePath })
     
     // ファイルを読み込み
-    const fileBuffer = fs.readFileSync(filePath)
+    const fileBuffer = fs.readFileSync(actualFilePath)
     
     // レスポンスヘッダーを設定
     const headers = new Headers()

@@ -36,26 +36,55 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     console.log('VideoPlayer: 動画URL:', videoUrlWithCache);
     setCachedVideoUrl(videoUrlWithCache)
     
-    // ファイルの存在確認を実行
+    // ファイルの存在確認を実行（複数のパスを試行）
     const checkFileExists = async () => {
       try {
         console.log('動画ファイル存在確認開始:', videoUrlWithCache)
         
-        const response = await fetch(videoUrlWithCache, { method: 'HEAD' })
-        console.log('HEAD リクエスト結果:', {
-          url: videoUrlWithCache,
-          status: response.status,
-          statusText: response.statusText
-        })
+        // 複数のパスを試行
+        const pathsToTry = [
+          videoUrlWithCache,
+          videoUrl.replace('/api/output/', '/output/'),
+          videoUrl.replace('/api/output/', '/api/video/direct/'),
+          videoUrl
+        ]
         
-        if (!response.ok) {
-          console.error('動画ファイルが見つかりません:', response.status, response.statusText)
-          setError(`動画ファイルが見つかりません (${response.status})`)
+        let foundPath = null
+        
+        for (const testPath of pathsToTry) {
+          try {
+            console.log('パス確認中:', testPath)
+            const response = await fetch(testPath, { method: 'HEAD' })
+            console.log('HEAD リクエスト結果:', {
+              url: testPath,
+              status: response.status,
+              statusText: response.statusText
+            })
+            
+            if (response.ok) {
+              console.log('動画ファイルを発見:', testPath)
+              foundPath = testPath
+              break
+            }
+          } catch (pathError) {
+            console.log('パスエラー:', testPath, pathError)
+          }
+        }
+        
+        if (!foundPath) {
+          console.error('すべてのパスで動画ファイルが見つかりません')
+          setError('動画ファイルが見つかりません。生成処理を確認してください。')
           setIsLoading(false)
           return
         }
         
-        console.log('動画ファイルの存在を確認:', response.status)
+        // 見つかったパスを使用
+        if (foundPath !== videoUrlWithCache) {
+          console.log('代替パスを使用:', foundPath)
+          setCachedVideoUrl(foundPath)
+        }
+        
+        console.log('動画ファイルの存在を確認:', foundPath)
       } catch (error) {
         console.error('動画ファイル確認エラー:', error)
         setError('動画ファイルの確認中にエラーが発生しました')
