@@ -36,63 +36,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     console.log('VideoPlayer: 動画URL:', videoUrlWithCache);
     setCachedVideoUrl(videoUrlWithCache)
     
-    // ファイルの存在確認を実行（複数のパスを試行）
-    const checkFileExists = async () => {
-      try {
-        console.log('動画ファイル存在確認開始:', videoUrlWithCache)
-        
-        // 複数のパスを試行
-        const pathsToTry = [
-          videoUrlWithCache,
-          videoUrl.replace('/api/output/', '/output/'),
-          videoUrl.replace('/api/output/', '/api/video/direct/'),
-          videoUrl
-        ]
-        
-        let foundPath = null
-        
-        for (const testPath of pathsToTry) {
-          try {
-            console.log('パス確認中:', testPath)
-            const response = await fetch(testPath, { method: 'HEAD' })
-            console.log('HEAD リクエスト結果:', {
-              url: testPath,
-              status: response.status,
-              statusText: response.statusText
-            })
-            
-            if (response.ok) {
-              console.log('動画ファイルを発見:', testPath)
-              foundPath = testPath
-              break
-            }
-          } catch (pathError) {
-            console.log('パスエラー:', testPath, pathError)
-          }
-        }
-        
-        if (!foundPath) {
-          console.error('すべてのパスで動画ファイルが見つかりません')
-          setError('動画ファイルが見つかりません。生成処理を確認してください。')
-          setIsLoading(false)
-          return
-        }
-        
-        // 見つかったパスを使用
-        if (foundPath !== videoUrlWithCache) {
-          console.log('代替パスを使用:', foundPath)
-          setCachedVideoUrl(foundPath)
-        }
-        
-        console.log('動画ファイルの存在を確認:', foundPath)
-      } catch (error) {
-        console.error('動画ファイル確認エラー:', error)
-        setError('動画ファイルの確認中にエラーが発生しました')
-        setIsLoading(false)
-      }
-    }
-    
-    checkFileExists()
+    // 動画URLを直接設定（事前確認なし）
+    console.log('動画URL設定:', videoUrlWithCache)
     
     // 読み込みタイムアウトを設定
     const loadingTimeout = setTimeout(() => {
@@ -296,23 +241,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                     const newUrl = videoUrl.split('?')[0] + `?retry=${timestamp}`
                     setCachedVideoUrl(newUrl)
                     
-                    // ファイルの存在を再確認
-                    try {
-                      const response = await fetch(newUrl, { method: 'HEAD' })
-                      if (!response.ok) {
-                        setError(`動画ファイルが見つかりません (${response.status})`)
-                        setIsLoading(false)
-                      } else {
-                        console.log('再試行: 動画ファイルの存在を確認')
-                        // 動画要素を強制的に再読み込み
-                        if (videoRef.current) {
-                          videoRef.current.load()
-                        }
-                      }
-                    } catch (error) {
-                      console.error('再試行時のファイル確認エラー:', error)
-                      setError('動画ファイルの確認中にエラーが発生しました')
-                      setIsLoading(false)
+                    // 動画要素を強制的に再読み込み
+                    if (videoRef.current) {
+                      videoRef.current.src = newUrl
+                      videoRef.current.load()
                     }
                   }}
                   className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
