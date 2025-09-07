@@ -34,10 +34,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     console.log('VideoPlayer: 新しいキャッシュバスター付きURL:', videoUrlWithCache);
     setCachedVideoUrl(videoUrlWithCache)
     
+    // 既存のビデオ要素をクリア
     if (videoRef.current) {
-      // 動画を再読み込み
+      videoRef.current.pause();
+      videoRef.current.removeAttribute('src');
       videoRef.current.load();
     }
+    
+    // 少し遅延させてから新しいURLを設定
+    const timer = setTimeout(() => {
+      if (videoRef.current) {
+        videoRef.current.load();
+      }
+    }, 100);
+    
+    return () => {
+      clearTimeout(timer);
+    };
   }, [videoUrl]) // videoUrlが変わった時だけ実行
 
   const handleLoadStart = () => {
