@@ -874,19 +874,13 @@ async function generateSubtitleVideo({
         }
       });
       
-      // 処理済みのセグメントからSRTを生成（重複チェック付き）
-      const usedTexts = new Set()
-      let segmentIndex = 1
-      
-      processedTranscript.forEach((segment) => {
-        // 同じテキストの重複を避ける
-        if (!usedTexts.has(segment.text.trim()) && segment.text.trim().length > 0) {
+      // 処理済みのセグメントからSRTを生成
+      processedTranscript.forEach((segment, index) => {
+        if (segment.text.trim().length > 0) {
           const startTime = formatSRTTime(segment.startTime)
           const endTime = formatSRTTime(segment.endTime)
-          srtContent += `${segmentIndex}\n${startTime} --> ${endTime}\n${segment.text.trim()}\n\n`
-          console.log(`字幕セグメント ${segmentIndex}: ${startTime} --> ${endTime} | ${segment.text.trim()}`)
-          usedTexts.add(segment.text.trim())
-          segmentIndex++
+          srtContent += `${index + 1}\n${startTime} --> ${endTime}\n${segment.text.trim()}\n\n`
+          console.log(`字幕セグメント ${index + 1}: ${startTime} --> ${endTime} | ${segment.text.trim()}`)
         }
       })
     } else {
@@ -899,18 +893,34 @@ async function generateSubtitleVideo({
       console.log('テキスト言語判定:', isJapanese ? '日本語' : '英語');
       
       if (isJapanese) {
-        // 日本語テキストの場合：句読点で分割し、適切な長さに調整
+        // 日本語テキストの場合：適切な長さで分割
         const sentences = text.split(/[。！？]/).filter((s: string) => s.trim());
-        const maxSegments = Math.min(sentences.length, Math.floor(audioDuration / 3)); // 最低3秒間隔
-        const segmentDuration = audioDuration / Math.max(maxSegments, 1);
         
-        sentences.slice(0, maxSegments).forEach((sentence: string, index: number) => {
-          if (sentence.trim()) {
+        if (sentences.length === 0) {
+          // 句読点がない場合は文字数で分割
+          const maxCharsPerSegment = 20;
+          const segments = [];
+          for (let i = 0; i < text.length; i += maxCharsPerSegment) {
+            segments.push(text.slice(i, i + maxCharsPerSegment));
+          }
+          
+          const segmentDuration = audioDuration / segments.length;
+          segments.forEach((segment, index) => {
             const startTime = index * segmentDuration;
             const endTime = Math.min((index + 1) * segmentDuration, audioDuration);
-            srtContent += `${index + 1}\n${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n${sentence.trim()}\n\n`;
-          }
-        });
+            srtContent += `${index + 1}\n${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n${segment.trim()}\n\n`;
+          });
+        } else {
+          // 句読点で分割された文を使用
+          const segmentDuration = audioDuration / sentences.length;
+          sentences.forEach((sentence: string, index: number) => {
+            if (sentence.trim()) {
+              const startTime = index * segmentDuration;
+              const endTime = Math.min((index + 1) * segmentDuration, audioDuration);
+              srtContent += `${index + 1}\n${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n${sentence.trim()}\n\n`;
+            }
+          });
+        }
       } else {
         // 英語テキストの場合：単語で分割
         const words = text.split(' ');
@@ -991,9 +1001,9 @@ async function generateSubtitleVideo({
         hasAudio = true
       }
       
-      // 字幕フィルターを追加（エスケープ処理を改善）
-      const escapedSubtitlePath = subtitlePath.replace(/\\/g, '/').replace(/:/g, '\\:')
-      const subtitleFilter = `subtitles='${escapedSubtitlePath}':force_style='FontSize=24,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2,Shadow=1'`
+      // 字幕フィルターを追加（パスのエスケープを修正）
+      const normalizedSubtitlePath = subtitlePath.replace(/\\/g, '/')
+      const subtitleFilter = `subtitles=${normalizedSubtitlePath}:force_style='FontSize=28,PrimaryColour=&Hffffff,OutlineColour=&H000000,Outline=2,Shadow=1,Bold=1'`
       
       // 動画素材を使用する場合とそうでない場合でフィルターを分ける
       const videoFilters = [`scale=${settings.resolution?.width || 1920}:${settings.resolution?.height || 1080}:force_original_aspect_ratio=decrease,pad=${settings.resolution?.width || 1920}:${settings.resolution?.height || 1080}:(ow-iw)/2:(oh-ih)/2`]
@@ -1022,7 +1032,16 @@ async function generateSubtitleVideo({
           .audioBitrate('128k')
           .audioFrequency(44100)
           .audioChannels(2)
-          .outputOptions(['-map', '0:v', '-map', '1:a', '-shortest'])
+          .outputOptions(['-shortest'])
+          
+        // 音声と動画を明示的にマッピング
+        if (inputOptions.includes('-loop 1')) {
+          // 静止画像の場合
+          ffmpegCommand.outputOptions(['-map', '0:v:0', '-map', '1:a:0'])
+        } else {
+          // 動画の場合
+          ffmpegCommand.outputOptions(['-map', '0:v:0', '-map', '1:a:0'])
+        }
       } else {
         console.log('No audio file, creating silent video')
         ffmpegCommand.outputOptions(['-an', '-t', audioDuration.toString()])

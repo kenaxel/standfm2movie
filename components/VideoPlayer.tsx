@@ -25,7 +25,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     console.log('VideoPlayer: 動画URL設定:', videoUrl)
     
     if (videoRef.current) {
-      videoRef.current.src = videoUrl
+      // キャッシュを回避するためのタイムスタンプを追加
+      const timestamp = Date.now()
+      const urlWithTimestamp = videoUrl.includes('?') 
+        ? `${videoUrl}&t=${timestamp}` 
+        : `${videoUrl}?t=${timestamp}`
+      
+      videoRef.current.src = urlWithTimestamp
       videoRef.current.load()
     }
   }, [videoUrl])
