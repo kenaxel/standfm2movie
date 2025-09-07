@@ -91,33 +91,47 @@ async function searchMediaAssets(keywords: string[], scenes: any[]): Promise<Vid
       console.log(`シーン ${scene.startTime}-${scene.endTime}s の検索クエリ:`, searchQuery)
       
       try {
-        // Pexelsから動画を検索（検索数を2に減らして効率化）
-        const videos = await searchVideos(searchQuery, 2)
-        for (const video of videos) {
+        // Pexelsから動画を検索（検索数を増やす）
+        const videos = await searchVideos(searchQuery, 5)
+        
+        // 各動画に異なる開始時間を割り当てる
+        const sceneDuration = scene.endTime - scene.startTime
+        const videoDuration = sceneDuration / Math.max(videos.length, 1)
+        
+        videos.forEach((video, index) => {
+          const videoStartTime = scene.startTime + (index * videoDuration)
+          const videoEndTime = Math.min(videoStartTime + (video.duration || 5), scene.endTime)
+          
           assets.push({
             type: 'video',
             url: video.url,
-            duration: video.duration || 8, // デフォルト動画時間を8秒に短縮
-            startTime: scene.startTime,
-            endTime: scene.endTime
+            duration: videoEndTime - videoStartTime,
+            startTime: videoStartTime,
+            endTime: videoEndTime
           })
-        }
+        })
         
-        // Unsplashから画像を検索（検索数を3に減らして効率化）
-        const images = await searchPhotos(searchQuery, 3)
-        for (const image of images) {
-          // シーンの長さに基づいて画像表示時間を動的に調整
-          const sceneDuration = scene.endTime - scene.startTime
-          const imageDuration = Math.min(Math.max(sceneDuration * 0.8, 3), 8) // 3-8秒の範囲で調整
+        // Unsplashから画像を検索（検索数を増やす）
+        const images = await searchPhotos(searchQuery, 8)
+        
+        // 各画像に異なる開始時間を割り当てる
+        const imageDuration = 3 // 各画像の表示時間を短く
+        
+        images.forEach((image, index) => {
+          // シーン内で均等に分散
+          const imageStartTime = scene.startTime + (index * (sceneDuration / Math.max(images.length, 1)))
+          const imageEndTime = Math.min(imageStartTime + imageDuration, scene.endTime)
           
-          assets.push({
-            type: 'image',
-            url: image.url,
-            duration: imageDuration,
-            startTime: scene.startTime,
-            endTime: scene.endTime
-          })
-        }
+          if (imageStartTime < imageEndTime) {
+            assets.push({
+              type: 'image',
+              url: image.url,
+              duration: imageEndTime - imageStartTime,
+              startTime: imageStartTime,
+              endTime: imageEndTime
+            })
+          }
+        })
         
       } catch (searchError) {
         console.error(`シーン ${scene.startTime}-${scene.endTime}s の検索エラー:`, searchError)
@@ -512,14 +526,40 @@ async function generateTimelineBasedVideo({
   try {
     console.log(`タイムライン動画生成: ${timeline.length}個のセグメント`)
     
+    // タイムラインを時間順にソート
+    const sortedTimeline = [...timeline].sort((a, b) => a.startTime - b.startTime);
+    
+    // 重複するセグメントを削除（同じ時間帯に複数のセグメントがある場合）
+    const uniqueTimeline: any[] = [];
+    let lastEndTime = 0;
+    
+    for (const segment of sortedTimeline) {
+      // 前のセグメントと重複しない部分だけを使用
+      if (segment.startTime >= lastEndTime) {
+        uniqueTimeline.push(segment);
+        lastEndTime = segment.endTime;
+      } else if (segment.endTime > lastEndTime) {
+        // 部分的に重複する場合は、重複しない部分だけを使用
+        const adjustedSegment = {
+          ...segment,
+          startTime: lastEndTime,
+        };
+        uniqueTimeline.push(adjustedSegment);
+        lastEndTime = segment.endTime;
+      }
+      // 完全に重複する場合はスキップ
+    }
+    
+    console.log(`重複除去後のタイムライン: ${uniqueTimeline.length}個のセグメント`);
+    
     // 各セグメント用の動画ファイルを生成
     const segmentPaths: string[] = []
     
-    for (let i = 0; i < timeline.length; i++) {
-      const segment = timeline[i]
+    for (let i = 0; i < uniqueTimeline.length; i++) {
+      const segment = uniqueTimeline[i]
       const segmentPath = path.join(tempDir, `segment_${i}.mp4`)
       
-      console.log(`セグメント ${i + 1}/${timeline.length} 生成中:`, segment.asset.url)
+      console.log(`セグメント ${i + 1}/${uniqueTimeline.length} 生成中:`, segment.asset.url)
       
       // セグメント動画を生成
       await generateSegmentVideo({
@@ -703,15 +743,40 @@ async function transcribeAudioWithTimestamps(audioPath: string): Promise<Transcr
         }
       }
     } else if (transcription.text) {
-      // セグメント情報がない場合は全体を一つのセグメントとして扱う
-      const trimmedText = transcription.text.trim()
-      if (trimmedText) {
-        segments.push({
-          text: trimmedText,
-          startTime: 0,
-          endTime: 60 // デフォルト値
-        })
+      // セグメント情報がない場合は文を分割して複数のセグメントを作成
+      const text = transcription.text.trim();
+      
+      // 日本語の場合は句読点で分割
+      const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
+      let sentences = [];
+      
+      if (isJapanese) {
+        sentences = text.split(/[。.!?！？]/).filter(s => s.trim());
+      } else {
+        // 英語の場合はピリオドなどで分割
+        sentences = text.split(/[.!?]/).filter(s => s.trim());
       }
+      
+      // 音声の長さを推定（デフォルト60秒）
+      let audioDuration = 60;
+      try {
+        audioDuration = await getAudioDuration(audioPath);
+      } catch (err) {
+        console.log('音声長の取得に失敗、デフォルト値を使用:', err);
+      }
+      
+      // 各文に均等に時間を割り当て
+      const segmentDuration = audioDuration / Math.max(sentences.length, 1);
+      
+      sentences.forEach((sentence, index) => {
+        if (sentence.trim()) {
+          segments.push({
+            text: sentence.trim(),
+            startTime: index * segmentDuration,
+            endTime: (index + 1) * segmentDuration
+          });
+        }
+      });
     }
     
     console.log('文字起こし完了:', segments.length, '個のセグメント')
@@ -762,9 +827,25 @@ async function generateSubtitleVideo({
       const minSegmentDuration = 1.0; // 最小セグメント長（秒）
       const processedTranscript: TranscriptSegment[] = [];
       
+      // 字幕のタイミングを調整するための処理
+      // 1. まず全体の時間を確認
+      const totalTranscriptDuration = transcript.reduce((max, segment) => 
+        Math.max(max, segment.endTime), 0);
+      
+      // 2. 音声の長さと文字起こしの長さが大きく異なる場合は調整
+      const scaleFactor = totalTranscriptDuration > 0 ? 
+        audioDuration / totalTranscriptDuration : 1;
+      
+      // 3. スケーリングされたトランスクリプトを作成
+      const scaledTranscript = transcript.map(segment => ({
+        ...segment,
+        startTime: segment.startTime * scaleFactor,
+        endTime: segment.endTime * scaleFactor
+      }));
+      
       let currentSegment: TranscriptSegment | null = null;
       
-      transcript.forEach((segment, index) => {
+      scaledTranscript.forEach((segment, index) => {
         // セグメントの長さを計算
         const segmentDuration = segment.endTime - segment.startTime;
         
@@ -782,7 +863,7 @@ async function generateSubtitleVideo({
         }
         
         // 最後のセグメントの処理
-        if (index === transcript.length - 1 && currentSegment) {
+        if (index === scaledTranscript.length - 1 && currentSegment) {
           processedTranscript.push(currentSegment);
         }
       });

@@ -162,7 +162,7 @@ export default function Home() {
         
         // 音声ファイルをBase64に変換（ファイルの場合）
         let audioInputForVideo: any = null
-        
+    
         // 毎回新しい音声入力オブジェクトを作成してキャッシュを回避
         if (audioSource && audioSource.type === 'file' && audioSource.source instanceof File) {
           const file = audioSource.source as File
@@ -178,9 +178,16 @@ export default function Home() {
             timestamp: Date.now() // キャッシュ回避用タイムスタンプ
           }
         } else if (audioSource && audioSource.type === 'url') {
+          // URLの場合、キャッシュを回避するためのパラメータを追加
+          const sourceUrl = audioSource.source;
+          const urlWithCache = sourceUrl.includes('?') 
+            ? `${sourceUrl}&cache=${Date.now()}` 
+            : `${sourceUrl}?cache=${Date.now()}`;
+      
           audioInputForVideo = {
             type: 'url',
-            source: audioSource.source,
+            source: urlWithCache,
+            originalSource: sourceUrl,
             timestamp: Date.now() // キャッシュ回避用タイムスタンプ
           }
         } else {

@@ -21,20 +21,32 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   useEffect(() => {
     setIsLoading(true)
     setError(null)
+    
+    // 完全に新しいURLを生成してキャッシュを回避
+    const cacheBuster = `cache=${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+    const videoUrlWithCache = videoUrl.includes('?') 
+      ? `${videoUrl}&${cacheBuster}` 
+      : `${videoUrl}?${cacheBuster}`;
+    
     if (videoRef.current) {
-      videoRef.current.load() // 動画を再読み込み
-      
-      // キャッシュ回避のためにURLにタイムスタンプを追加
+      // 動画要素を完全にリセット
       const videoElement = videoRef.current;
-      const source = videoElement.querySelector('source');
-      if (source) {
-        const originalSrc = source.src;
-        const timestamp = Date.now();
-        source.src = originalSrc.includes('?') 
-          ? `${originalSrc}&t=${timestamp}` 
-          : `${originalSrc}?t=${timestamp}`;
-        videoElement.load();
+      
+      // 既存のsource要素を削除
+      while (videoElement.firstChild) {
+        videoElement.removeChild(videoElement.firstChild);
       }
+      
+      // 新しいsource要素を作成
+      const source = document.createElement('source');
+      source.src = videoUrlWithCache;
+      source.type = 'video/mp4';
+      
+      // source要素を追加
+      videoElement.appendChild(source);
+      
+      // 動画を再読み込み
+      videoElement.load();
     }
   }, [videoUrl])
 
@@ -98,7 +110,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onCanPlay={handleCanPlay}
               onError={handleError}
             >
-              <source src={`${videoUrl}?t=${Date.now()}`} type="video/mp4" />
+              <source src={`${videoUrl}?t=${Date.now()}&r=${Math.random()}`} type="video/mp4" />
               お使いのブラウザは動画の再生に対応していません。
             </video>
           )}
