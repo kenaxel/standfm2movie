@@ -24,11 +24,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setError(null)
     
     // 完全に新しいURLを生成してキャッシュを回避
-    const cacheBuster = `cache=${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 15);
+    const cacheBuster = `cache=${timestamp}-${randomStr}&nocache=true&t=${timestamp}`;
     const videoUrlWithCache = videoUrl.includes('?') 
       ? `${videoUrl}&${cacheBuster}` 
       : `${videoUrl}?${cacheBuster}`;
     
+    console.log('VideoPlayer: 新しいキャッシュバスター付きURL:', videoUrlWithCache);
     setCachedVideoUrl(videoUrlWithCache)
     
     if (videoRef.current) {

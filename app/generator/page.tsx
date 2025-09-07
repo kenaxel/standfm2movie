@@ -195,18 +195,41 @@ export default function GeneratorPage() {
           }
         }
         
+        // 文字起こしを適切なセグメントに分割
+        const segmentLength = 10; // 10秒ごとにセグメント分割
+        const transcriptSegments = [];
+        
+        // 文字起こしテキストを単語数に基づいて分割
+        const words = currentTranscript.split(/\s+/);
+        const wordsPerSegment = Math.ceil(words.length / (videoSettings.duration / segmentLength));
+        
+        for (let i = 0; i < words.length; i += wordsPerSegment) {
+          const segmentWords = words.slice(i, i + wordsPerSegment);
+          const segmentText = segmentWords.join(' ');
+          const startTime = (i / wordsPerSegment) * segmentLength;
+          const endTime = Math.min(startTime + segmentLength, videoSettings.duration);
+          
+          transcriptSegments.push({
+            text: segmentText,
+            startTime,
+            endTime
+          });
+        }
+        
+        console.log('生成する字幕セグメント:', transcriptSegments);
+        
+        const uniqueCacheBreaker = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+        
         const videoResponse = await fetch('/api/generate-video', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             audioInput: audioInputForVideo,
             settings: videoSettings,
-            transcript: [{
-              text: currentTranscript,
-              startTime: 0,
-              endTime: videoSettings.duration
-            }],
-            cacheBreaker: Date.now() // キャッシュ回避用のタイムスタンプを追加
+            transcript: transcriptSegments,
+            cacheBreaker: uniqueCacheBreaker,
+            forceRefresh: true,
+            timestamp: Date.now()
           })
         })
         
@@ -224,16 +247,20 @@ export default function GeneratorPage() {
 
         // 動画URLにタイムスタンプパラメータを追加してキャッシュを回避
         const timestamp = Date.now()
+        const randomStr = Math.random().toString(36).substring(2, 15)
         const resultWithTimestamp = {
           ...videoResult.result,
-          videoUrl: `${videoResult.result.videoUrl}?t=${timestamp}&cache=${Math.random()}`
+          videoUrl: `${videoResult.result.videoUrl}?t=${timestamp}&cache=${randomStr}&nocache=true`
         }
+        
+        console.log('新しい動画URL:', resultWithTimestamp.videoUrl)
         
         // 古い動画の状態をクリアしてから新しい動画を設定
         setGeneratedVideo(null)
+        // 少し待ってから新しい動画を設定（DOMの更新を確実にするため）
         setTimeout(() => {
           setGeneratedVideo(resultWithTimestamp)
-        }, 100)
+        }, 300)
       } else {
         // 記事生成（既存の文字起こし結果を使用）
         console.log('記事生成開始:', { transcript: currentTranscript.substring(0, 100) + '...', settings })
