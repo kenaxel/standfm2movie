@@ -91,27 +91,41 @@ async function searchMediaAssets(keywords: string[], scenes: any[]): Promise<Vid
       console.log(`シーン ${scene.startTime}-${scene.endTime}s の検索クエリ:`, searchQuery)
       
       try {
-        // Pexelsから動画を検索
-        const videos = await searchVideos(searchQuery, 3)
+        // Pexelsから動画を検索 - 各シーンに複数の動画を割り当て
+        const videos = await searchVideos(searchQuery, 5) // 増加
         for (const video of videos) {
           assets.push({
             type: 'video',
             url: video.url,
-            duration: video.duration || 10,
+            duration: Math.min(video.duration || 10, scene.endTime - scene.startTime),
             startTime: scene.startTime,
             endTime: scene.endTime
           })
         }
         
-        // Unsplashから画像を検索
-        const images = await searchPhotos(searchQuery, 5)
+        // Unsplashから画像を検索 - 各シーンに複数の画像を割り当て
+        const images = await searchPhotos(searchQuery, 8) // 増加
         for (const image of images) {
+          // 画像の表示時間を短くして複数表示できるようにする
+          const imageDuration = 3; // 短縮
+          // シーン内で均等に分散させる
+          const availableTime = scene.endTime - scene.startTime;
+          const imageIndex = assets.filter(a => 
+            a.startTime >= scene.startTime && 
+            a.endTime <= scene.endTime && 
+            a.type === 'image'
+          ).length;
+          
+          // 画像の開始時間を計算（シーン内で均等に分散）
+          const imageStartTime = scene.startTime + 
+            (imageIndex * (availableTime / Math.max(images.length, 1)));
+          
           assets.push({
             type: 'image',
             url: image.url,
-            duration: 5, // 画像の表示時間
-            startTime: scene.startTime,
-            endTime: scene.endTime
+            duration: imageDuration,
+            startTime: imageStartTime,
+            endTime: Math.min(imageStartTime + imageDuration, scene.endTime)
           })
         }
         
@@ -219,6 +233,34 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<strin
       try {
         let audioUrl = audioInput.source
         
+        // 過去の音声ファイルのURLかどうかをチェック
+        if (audioUrl.startsWith('/api/audio/') || audioUrl.includes('/api/audio/')) {
+          console.log('過去の音声ファイルURLを検出:', audioUrl)
+          
+          // URLからファイル名を抽出
+          const fileName = audioUrl.split('/').pop();
+          if (!fileName) {
+            throw new Error('Invalid audio file URL');
+          }
+          
+          // 実際のファイルパスを構築
+          const storedFilePath = path.join(process.cwd(), 'public', 'audio', fileName);
+          
+          // ファイルが存在するか確認
+          if (fs.existsSync(storedFilePath)) {
+            console.log('過去の音声ファイルが見つかりました:', storedFilePath);
+            // ファイルを一時ディレクトリにコピー
+            await fs.promises.copyFile(storedFilePath, audioPath);
+            return audioPath;
+          } else {
+            console.log('過去の音声ファイルが見つかりません:', storedFilePath);
+            // 代替URLを試す
+            const alternativeUrl = `${process.env.NEXT_PUBLIC_API_URL || ''}${audioUrl}`;
+            console.log('代替URLを試みます:', alternativeUrl);
+            audioUrl = alternativeUrl;
+          }
+        }
+        
         // Stand.FMのURLの場合、実際の音声ファイルURLを取得
         if (audioUrl.includes('stand.fm')) {
           console.log('Stand.FM URL detected, extracting audio URL...')
@@ -287,6 +329,13 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<strin
             console.error('Error extracting Stand.FM audio URL:', extractError)
             return null
           }
+        }
+        
+        // キャッシュを回避するためのパラメータを追加
+        if (!audioUrl.includes('?')) {
+          audioUrl = `${audioUrl}?t=${Date.now()}`;
+        } else {
+          audioUrl = `${audioUrl}&t=${Date.now()}`;
         }
         
         const response = await fetch(audioUrl)
@@ -645,12 +694,28 @@ async function transcribeAudioWithTimestamps(audioPath: string): Promise<Transcr
         })
       }
     } else if (transcription.text) {
-      // セグメント情報がない場合は全体を一つのセグメントとして扱う
-      segments.push({
-        text: transcription.text.trim(),
-        startTime: 0,
-        endTime: 60 // デフォルト値
-      })
+      // セグメント情報がない場合は文を分割して複数のセグメントを作成
+      const text = transcription.text.trim();
+      const sentences = text.split(/[。.!?！？]/).filter(s => s.trim());
+      
+      // 音声の長さを推定（デフォルト60秒）
+      let audioDuration = 60;
+      try {
+        audioDuration = await getAudioDuration(audioPath);
+      } catch (err) {
+        console.log('音声長の取得に失敗、デフォルト値を使用:', err);
+      }
+      
+      // 各文に均等に時間を割り当て
+      const segmentDuration = audioDuration / Math.max(sentences.length, 1);
+      
+      sentences.forEach((sentence, index) => {
+        segments.push({
+          text: sentence.trim(),
+          startTime: index * segmentDuration,
+          endTime: (index + 1) * segmentDuration
+        });
+      });
     }
     
     console.log('文字起こし完了:', segments.length, '個のセグメント')
@@ -696,7 +761,38 @@ async function generateSubtitleVideo({
     if (transcript && transcript.length > 0) {
       // 文字起こしデータから字幕を生成
       console.log('transcriptから字幕を生成:', transcript)
+      
+      // 字幕の重複を避けるため、短すぎるセグメントを結合
+      const minSegmentDuration = 1.0; // 最小セグメント長（秒）
+      const processedTranscript: TranscriptSegment[] = [];
+      
+      let currentSegment: TranscriptSegment | null = null;
+      
       transcript.forEach((segment, index) => {
+        // セグメントの長さを計算
+        const segmentDuration = segment.endTime - segment.startTime;
+        
+        if (!currentSegment) {
+          currentSegment = { ...segment };
+        } else if (segmentDuration < minSegmentDuration || 
+                  (segment.startTime - currentSegment.endTime) < 0.3) {
+          // セグメントが短すぎる、または前のセグメントとの間隔が短すぎる場合は結合
+          currentSegment.text += ' ' + segment.text;
+          currentSegment.endTime = segment.endTime;
+        } else {
+          // 十分な長さのセグメントは追加して新しいセグメントを開始
+          processedTranscript.push(currentSegment);
+          currentSegment = { ...segment };
+        }
+        
+        // 最後のセグメントの処理
+        if (index === transcript.length - 1 && currentSegment) {
+          processedTranscript.push(currentSegment);
+        }
+      });
+      
+      // 処理済みのセグメントからSRTを生成
+      processedTranscript.forEach((segment, index) => {
         const startTime = formatSRTTime(segment.startTime)
         const endTime = formatSRTTime(segment.endTime)
         srtContent += `${index + 1}\n${startTime} --> ${endTime}\n${segment.text}\n\n`
@@ -707,19 +803,38 @@ async function generateSubtitleVideo({
       console.log('transcriptが空のため、audioInputから字幕を生成')
       const text = typeof audioInput === 'string' ? audioInput : (audioInput as any).source
       
-      // テキストを20個のセグメントに分割
-      const words = text.split(' ')
-      const wordsPerSegment = Math.ceil(words.length / 20)
-      const segmentDuration = audioDuration / 20
+      // 日本語の場合は文字単位、英語の場合は単語単位で分割
+      const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
+      console.log('テキスト言語判定:', isJapanese ? '日本語' : '英語');
       
-      for (let i = 0; i < 20; i++) {
-        const startTime = i * segmentDuration
-        const endTime = (i + 1) * segmentDuration
-        const segmentWords = words.slice(i * wordsPerSegment, (i + 1) * wordsPerSegment)
-        const segmentText = segmentWords.join(' ')
+      if (isJapanese) {
+        // 日本語テキストの場合：句読点で分割
+        const sentences = text.split(/[。！？]/).filter(s => s.trim());
+        const segmentCount = Math.min(sentences.length, 30); // 最大30セグメント
+        const segmentDuration = audioDuration / Math.max(segmentCount, 1);
         
-        if (segmentText.trim()) {
-          srtContent += `${i + 1}\n${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n${segmentText}\n\n`
+        sentences.forEach((sentence, index) => {
+          if (index < 30 && sentence.trim()) { // 最大30セグメントまで
+            const startTime = index * segmentDuration;
+            const endTime = (index + 1) * segmentDuration;
+            srtContent += `${index + 1}\n${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n${sentence.trim()}\n\n`;
+          }
+        });
+      } else {
+        // 英語テキストの場合：単語で分割
+        const words = text.split(' ');
+        const wordsPerSegment = Math.ceil(words.length / 20);
+        const segmentDuration = audioDuration / 20;
+        
+        for (let i = 0; i < 20; i++) {
+          const startTime = i * segmentDuration;
+          const endTime = (i + 1) * segmentDuration;
+          const segmentWords = words.slice(i * wordsPerSegment, (i + 1) * wordsPerSegment);
+          const segmentText = segmentWords.join(' ');
+          
+          if (segmentText.trim()) {
+            srtContent += `${i + 1}\n${formatSRTTime(startTime)} --> ${formatSRTTime(endTime)}\n${segmentText}\n\n`;
+          }
         }
       }
     }

@@ -23,6 +23,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setError(null)
     if (videoRef.current) {
       videoRef.current.load() // 動画を再読み込み
+      
+      // キャッシュ回避のためにURLにタイムスタンプを追加
+      const videoElement = videoRef.current;
+      const source = videoElement.querySelector('source');
+      if (source) {
+        const originalSrc = source.src;
+        const timestamp = Date.now();
+        source.src = originalSrc.includes('?') 
+          ? `${originalSrc}&t=${timestamp}` 
+          : `${originalSrc}?t=${timestamp}`;
+        videoElement.load();
+      }
     }
   }, [videoUrl])
 

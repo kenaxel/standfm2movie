@@ -200,7 +200,8 @@ export default function Home() {
               text: currentTranscript,
               startTime: 0,
               endTime: videoSettings.duration
-            }]
+            }],
+            cacheBreaker: Date.now() // キャッシュ回避用のタイムスタンプを追加
           })
         })
         
