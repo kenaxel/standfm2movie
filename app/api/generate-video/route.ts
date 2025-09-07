@@ -819,6 +819,7 @@ async function generateSubtitleVideo({
   
   try {
     // 字幕ファイル（SRT形式）を生成
+    const timestamp = Date.now()
     const subtitlePath = path.join(tempDir, `subtitles_${timestamp}.srt`)
     let srtContent = ''
     
