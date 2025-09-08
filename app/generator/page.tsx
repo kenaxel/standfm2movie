@@ -199,44 +199,44 @@ export default function GeneratorPage() {
           }
         }
         
-        // 文字起こしを適切な長さのセグメントに分割
+        // 文字起こしを正確なタイミングでセグメント分割
         const transcriptSegments = []
-        const sentences = currentTranscript.split(/[。.!?！？]/g).filter(s => s.trim().length > 0)
         const totalDuration = videoSettings.duration
         
-        // 各文の長さに応じて時間を配分
-        const totalTextLength = sentences.reduce((sum, sentence) => sum + sentence.length, 0)
-        let currentTime = 0
+        // 文を適切に分割（句読点と改行を考慮）
+        const sentences = currentTranscript
+          .split(/[。！？\n]/)
+          .map(s => s.trim())
+          .filter(s => s.length > 0)
         
-        sentences.forEach((sentence, index) => {
-          const trimmedSentence = sentence.trim()
-          if (trimmedSentence) {
-            // 文の長さに応じて表示時間を計算（最低2秒、最大8秒）
-            const textLength = trimmedSentence.length
-            const proportion = textLength / totalTextLength
-            const baseDuration = totalDuration * proportion
-            const duration = Math.max(2, Math.min(8, baseDuration))
-            
-            const startTime = currentTime
-            const endTime = Math.min(currentTime + duration, totalDuration)
+        console.log('分割された文:', sentences.length, '個')
+        
+        if (sentences.length > 0) {
+          // 各文に均等に時間を配分（重複なし）
+          const segmentDuration = totalDuration / sentences.length
+          
+          sentences.forEach((sentence, index) => {
+            const startTime = index * segmentDuration
+            const endTime = Math.min((index + 1) * segmentDuration, totalDuration)
             
             transcriptSegments.push({
-              text: trimmedSentence,
-              startTime: startTime,
-              endTime: endTime
+              text: sentence,
+              startTime: parseFloat(startTime.toFixed(2)),
+              endTime: parseFloat(endTime.toFixed(2))
             })
             
-            currentTime = endTime
-            console.log(`セグメント ${index + 1}: ${startTime.toFixed(1)}s - ${endTime.toFixed(1)}s | ${trimmedSentence}`)
-          }
-        })
-        
-        // 最後のセグメントが動画の長さに達していない場合は調整
-        if (transcriptSegments.length > 0 && transcriptSegments[transcriptSegments.length - 1].endTime < totalDuration) {
-          transcriptSegments[transcriptSegments.length - 1].endTime = totalDuration
+            console.log(`セグメント ${index + 1}: ${startTime.toFixed(2)}s - ${endTime.toFixed(2)}s | ${sentence}`)
+          })
+        } else {
+          // フォールバック
+          transcriptSegments.push({
+            text: currentTranscript,
+            startTime: 0,
+            endTime: totalDuration
+          })
         }
         
-        console.log('改善された字幕セグメント:', transcriptSegments.length, '個')
+        console.log('最終字幕セグメント:', transcriptSegments.length, '個')
         
         // 動画生成リクエスト
         const videoResponse = await fetch('/api/generate-video', {
