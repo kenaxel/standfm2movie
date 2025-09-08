@@ -188,20 +188,28 @@ async function generateVideoWithShotstack({
     }
     
     // 3. レンダリングを開始
+    console.log('Shotstack APIキー確認:', SHOTSTACK_API_KEY ? 'あり' : 'なし')
+    console.log('Shotstack リクエストデータ:', JSON.stringify(edit, null, 2))
+    
     const renderResponse = await fetch('https://api.shotstack.io/stage/render', {
       method: 'POST',
       headers: {
-        'authorization': `Bearer ${SHOTSTACK_API_KEY}`,
+        'x-api-key': SHOTSTACK_API_KEY,
         'content-type': 'application/json'
       },
       body: JSON.stringify(edit)
     })
     
+    console.log('Shotstack レスポンスステータス:', renderResponse.status)
+    const responseText = await renderResponse.text()
+    console.log('Shotstack レスポンス:', responseText)
+    
     if (!renderResponse.ok) {
-      throw new Error(`Shotstackレンダリング開始に失敗: ${renderResponse.status}`)
+      throw new Error(`Shotstackレンダリング開始に失敗: ${renderResponse.status} - ${responseText}`)
     }
     
-    const { response } = await renderResponse.json()
+    const renderData = JSON.parse(responseText)
+    const { response } = renderData
     const renderId = response.id
     console.log('Shotstackレンダリング開始:', renderId)
     
@@ -215,7 +223,7 @@ async function generateVideoWithShotstack({
       
       const statusResponse = await fetch(`https://api.shotstack.io/stage/render/${renderId}`, {
         headers: {
-          'authorization': `Bearer ${SHOTSTACK_API_KEY}`
+          'x-api-key': SHOTSTACK_API_KEY
         }
       })
       
