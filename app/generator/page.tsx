@@ -195,8 +195,10 @@ export default function GeneratorPage() {
           const downloadResult = await downloadResponse.json()
           audioInputForVideo = {
             type: 'tempFile',
-            path: downloadResult.filePath
+            path: downloadResult.filePath,
+            originalUrl: audioSource.source
           }
+          console.log('音声ダウンロード結果:', downloadResult)
         }
         
         // 文字起こしを正確なタイミングでセグメント分割

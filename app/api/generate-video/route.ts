@@ -250,14 +250,55 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<strin
     let audioPath: string | null = null
     
     if (audioInput.type === 'tempFile' && audioInput.path) {
-      const sourcePath = path.join(process.cwd(), 'public', audioInput.path.replace('/api/audio/', 'audio/'))
+      // パスの正規化 - 複数のパターンに対応
+      let sourcePath: string
+      
+      if (audioInput.path.startsWith('/')) {
+        // 絶対パスの場合
+        sourcePath = audioInput.path
+      } else if (audioInput.path.includes('/tmp/')) {
+        // tmpディレクトリの場合
+        sourcePath = audioInput.path
+      } else if (audioInput.path.startsWith('/api/audio/')) {
+        // API経由の場合
+        sourcePath = path.join(process.cwd(), 'public', audioInput.path.replace('/api/audio/', 'audio/'))
+      } else {
+        // その他の場合
+        sourcePath = path.join(process.cwd(), audioInput.path)
+      }
+      
+      console.log('音声ファイル検索パス:', sourcePath)
+      
       if (fs.existsSync(sourcePath)) {
         audioPath = path.join(tempDir, `audio_${Date.now()}.mp3`)
         await fs.promises.copyFile(sourcePath, audioPath)
         console.log('音声ファイルをコピー:', audioPath)
+        
+        // ファイルサイズを確認
+        const stats = await fs.promises.stat(audioPath)
+        console.log('コピーされた音声ファイルサイズ:', stats.size, 'bytes')
+        
         return audioPath
       } else {
         console.error('音声ファイルが見つかりません:', sourcePath)
+        
+        // 代替パスを試す
+        const alternativePaths = [
+          path.join(process.cwd(), 'tmp', path.basename(audioInput.path)),
+          path.join(process.cwd(), 'public', 'audio', path.basename(audioInput.path)),
+          audioInput.path.replace('/api/audio/', path.join(process.cwd(), 'public', 'audio/'))
+        ]
+        
+        for (const altPath of alternativePaths) {
+          console.log('代替パスを試行:', altPath)
+          if (fs.existsSync(altPath)) {
+            audioPath = path.join(tempDir, `audio_${Date.now()}.mp3`)
+            await fs.promises.copyFile(altPath, audioPath)
+            console.log('代替パスで音声ファイルをコピー:', audioPath)
+            return audioPath
+          }
+        }
+        
         return null
       }
     }
