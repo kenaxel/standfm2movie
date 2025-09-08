@@ -4,6 +4,244 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 
+// AssemblyAIで音声をタイムスタンプ付きで文字起こし
+async function transcribeWithAssemblyAI(audioPath: string): Promise<{
+  transcript: string
+  segments: TranscriptSegment[]
+  duration: number
+}> {
+  const ASSEMBLY_AI_API_KEY = process.env.ASSEMBLY_AI_API_KEY
+  
+  if (!ASSEMBLY_AI_API_KEY) {
+    throw new Error('ASSEMBLY_AI_API_KEYが設定されていません')
+  }
+  
+  try {
+    console.log('AssemblyAIで音声をアップロード中...')
+    
+    // 1. 音声ファイルをAssemblyAIにアップロード
+    const audioData = await fs.promises.readFile(audioPath)
+    const uploadResponse = await fetch('https://api.assemblyai.com/v2/upload', {
+      method: 'POST',
+      headers: {
+        'authorization': ASSEMBLY_AI_API_KEY,
+        'content-type': 'application/octet-stream'
+      },
+      body: audioData
+    })
+    
+    if (!uploadResponse.ok) {
+      throw new Error(`音声アップロードに失敗: ${uploadResponse.status}`)
+    }
+    
+    const { upload_url } = await uploadResponse.json()
+    console.log('音声アップロード完了:', upload_url)
+    
+    // 2. 文字起こしを開始
+    const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
+      method: 'POST',
+      headers: {
+        'authorization': ASSEMBLY_AI_API_KEY,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        audio_url: upload_url,
+        language_code: 'ja',
+        punctuate: true,
+        format_text: true
+      })
+    })
+    
+    if (!transcriptResponse.ok) {
+      throw new Error(`文字起こし開始に失敗: ${transcriptResponse.status}`)
+    }
+    
+    const { id } = await transcriptResponse.json()
+    console.log('文字起こし開始:', id)
+    
+    // 3. 文字起こし完了を待機
+    let result
+    let attempts = 0
+    const maxAttempts = 60 // 最大10分待機
+    
+    do {
+      await new Promise(resolve => setTimeout(resolve, 10000)) // 10秒待機
+      
+      const statusResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${id}`, {
+        headers: {
+          'authorization': ASSEMBLY_AI_API_KEY
+        }
+      })
+      
+      if (!statusResponse.ok) {
+        throw new Error(`ステータス取得に失敗: ${statusResponse.status}`)
+      }
+      
+      result = await statusResponse.json()
+      console.log('文字起こしステータス:', result.status)
+      
+      attempts++
+    } while (result.status === 'processing' && attempts < maxAttempts)
+    
+    if (result.status !== 'completed') {
+      throw new Error(`文字起こしに失敗: ${result.status}`)
+    }
+    
+    // 4. セグメントデータを変換
+    const segments: TranscriptSegment[] = result.words?.map((word: any) => ({
+      text: word.text,
+      startTime: word.start / 1000, // ミリ秒を秒に変換
+      endTime: word.end / 1000
+    })) || []
+    
+    return {
+      transcript: result.text,
+      segments,
+      duration: result.audio_duration || 60
+    }
+    
+  } catch (error) {
+    console.error('AssemblyAI文字起こしエラー:', error)
+    throw error
+  }
+}
+
+// Shotstackで動画生成
+async function generateVideoWithShotstack({
+  audioPath,
+  segments,
+  settings,
+  duration
+}: {
+  audioPath: string | null
+  segments: TranscriptSegment[]
+  settings: any
+  duration: number
+}): Promise<string> {
+  const SHOTSTACK_API_KEY = process.env.SHOTSTACK_API_KEY
+  
+  if (!SHOTSTACK_API_KEY) {
+    throw new Error('SHOTSTACK_API_KEYが設定されていません')
+  }
+  
+  try {
+    console.log('Shotstackで動画生成開始...')
+    
+    // 1. 音声ファイルをアップロード（必要に応じて）
+    let audioUrl = null
+    if (audioPath && fs.existsSync(audioPath)) {
+      // 実際の実装では音声ファイルをクラウドストレージにアップロード
+      // ここではローカルファイルパスを使用（デモ用）
+      audioUrl = audioPath
+    }
+    
+    // 2. Shotstack編集データを構築
+    const timeline = {
+      soundtrack: audioUrl ? {
+        src: audioUrl,
+        effect: 'fadeIn'
+      } : null,
+      background: '#1e3a8a',
+      tracks: [
+        {
+          clips: [
+            // 背景クリップ
+            {
+              asset: {
+                type: 'html',
+                html: `<div style="width:100%;height:100%;background:linear-gradient(135deg,#1e3a8a,#3730a3);"></div>`
+              },
+              start: 0,
+              length: duration
+            },
+            // 字幕クリップ
+            ...segments.map((segment, index) => ({
+              asset: {
+                type: 'title',
+                text: segment.text,
+                style: 'minimal',
+                color: '#ffffff',
+                size: 'medium',
+                background: 'rgba(0,0,0,0.7)',
+                position: 'bottom'
+              },
+              start: segment.startTime,
+              length: segment.endTime - segment.startTime,
+              transition: {
+                in: 'fade',
+                out: 'fade'
+              }
+            }))
+          ]
+        }
+      ]
+    }
+    
+    const edit = {
+      timeline,
+      output: {
+        format: 'mp4',
+        resolution: `${settings.resolution?.width || 1280}x${settings.resolution?.height || 720}`,
+        fps: settings.fps || 30,
+        quality: 'medium'
+      }
+    }
+    
+    // 3. レンダリングを開始
+    const renderResponse = await fetch('https://api.shotstack.io/stage/render', {
+      method: 'POST',
+      headers: {
+        'authorization': `Bearer ${SHOTSTACK_API_KEY}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(edit)
+    })
+    
+    if (!renderResponse.ok) {
+      throw new Error(`Shotstackレンダリング開始に失敗: ${renderResponse.status}`)
+    }
+    
+    const { response } = await renderResponse.json()
+    const renderId = response.id
+    console.log('Shotstackレンダリング開始:', renderId)
+    
+    // 4. レンダリング完了を待機
+    let renderResult
+    let attempts = 0
+    const maxAttempts = 60 // 最大10分待機
+    
+    do {
+      await new Promise(resolve => setTimeout(resolve, 10000)) // 10秒待機
+      
+      const statusResponse = await fetch(`https://api.shotstack.io/stage/render/${renderId}`, {
+        headers: {
+          'authorization': `Bearer ${SHOTSTACK_API_KEY}`
+        }
+      })
+      
+      if (!statusResponse.ok) {
+        throw new Error(`Shotstackステータス取得に失敗: ${statusResponse.status}`)
+      }
+      
+      const statusData = await statusResponse.json()
+      renderResult = statusData.response
+      console.log('Shotstackレンダリングステータス:', renderResult.status)
+      
+      attempts++
+    } while (renderResult.status === 'rendering' && attempts < maxAttempts)
+    
+    if (renderResult.status !== 'done') {
+      throw new Error(`Shotstackレンダリングに失敗: ${renderResult.status}`)
+    }
+    
+    return renderResult.url
+    
+  } catch (error) {
+    console.error('Shotstack動画生成エラー:', error)
+    throw error
+  }
+}
+
 // 音声ファイルの処理関数
 async function processAudioFile(audioInput: any, tempDir: string): Promise<string | null> {
   if (!audioInput) return null
@@ -12,21 +250,11 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<strin
     let audioPath: string | null = null
     
     if (audioInput.type === 'tempFile' && audioInput.path) {
-      // 一時ファイルの場合
       const sourcePath = path.join(process.cwd(), 'public', audioInput.path.replace('/api/audio/', 'audio/'))
       if (fs.existsSync(sourcePath)) {
         audioPath = path.join(tempDir, `audio_${Date.now()}.mp3`)
         await fs.promises.copyFile(sourcePath, audioPath)
         console.log('音声ファイルをコピー:', audioPath)
-        
-        // 音声ファイルの存在と読み取り可能性を確認
-        const stats = await fs.promises.stat(audioPath)
-        console.log('音声ファイル情報:', {
-          size: stats.size,
-          path: audioPath,
-          readable: fs.constants.R_OK
-        })
-        
         return audioPath
       } else {
         console.error('音声ファイルが見つかりません:', sourcePath)
@@ -41,166 +269,12 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<strin
   }
 }
 
-// 正確な音声長を取得
-async function getAudioDuration(audioPath: string): Promise<number> {
-  return new Promise((resolve) => {
-    const { exec } = require('child_process')
-    const command = `ffprobe -v quiet -show_entries format=duration -of csv=p=0 "${audioPath}"`
-    
-    exec(command, (error: any, stdout: any, stderr: any) => {
-      if (error) {
-        console.error('音声長取得エラー:', error)
-        resolve(60) // デフォルト値
-      } else {
-        const duration = parseFloat(stdout.trim())
-        console.log('実際の音声長:', duration, '秒')
-        resolve(duration || 60)
-      }
-    })
-  })
-}
-
-// 新しい動画生成関数（音声同期を確実に）
-async function generateVideoWithAudioSync({
-  audioPath,
-  transcript,
-  settings,
-  outputPath,
-  tempDir
-}: {
-  audioPath: string | null
-  transcript: TranscriptSegment[]
-  settings: any
-  outputPath: string
-  tempDir: string
-}): Promise<string> {
-  console.log('音声同期動画生成開始')
-  
-  try {
-    // 音声の長さを正確に取得
-    let audioDuration = settings.duration || 60
-    if (audioPath && fs.existsSync(audioPath)) {
-      audioDuration = await getAudioDuration(audioPath)
-      console.log('検出された音声長:', audioDuration, '秒')
-    }
-    
-    // 背景画像を生成
-    const backgroundPath = path.join(tempDir, 'background.png')
-    const { createCanvas } = require('canvas')
-    const width = settings.resolution?.width || 1280
-    const height = settings.resolution?.height || 720
-    const canvas = createCanvas(width, height)
-    const ctx = canvas.getContext('2d')
-    
-    // シンプルな背景
-    const gradient = ctx.createLinearGradient(0, 0, width, height)
-    gradient.addColorStop(0, '#1e3a8a')
-    gradient.addColorStop(1, '#3730a3')
-    ctx.fillStyle = gradient
-    ctx.fillRect(0, 0, width, height)
-    
-    const buffer = canvas.toBuffer('image/png')
-    await fs.promises.writeFile(backgroundPath, buffer)
-    
-    // 字幕ファイル（ASS形式）を生成 - より正確なタイミング制御
-    const assPath = path.join(tempDir, 'subtitles.ass')
-    let assContent = `[Script Info]
-Title: Generated Video
-ScriptType: v4.00+
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,32,&H00ffffff,&H000000ff,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,2,1,2,10,10,30,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-`
-    
-    if (transcript && transcript.length > 0) {
-      transcript.forEach((segment, index) => {
-        const startTime = formatASSTime(segment.startTime)
-        const endTime = formatASSTime(segment.endTime)
-        assContent += `Dialogue: 0,${startTime},${endTime},Default,,0,0,0,,${segment.text.trim()}\n`
-        console.log(`字幕 ${index + 1}: ${startTime} --> ${endTime} | ${segment.text.trim()}`)
-      })
-    } else {
-      const endTime = formatASSTime(audioDuration)
-      assContent += `Dialogue: 0,0:00:00.00,${endTime},Default,,0,0,0,,生成された動画\n`
-    }
-    
-    await fs.promises.writeFile(assPath, assContent, 'utf8')
-    console.log('字幕ファイル生成完了:', assPath)
-    
-    // FFmpegで動画生成（音声を確実に含める）
-    return new Promise((resolve, reject) => {
-      const { exec } = require('child_process')
-      
-      let command = `ffmpeg -y`
-      
-      // 背景画像を入力
-      command += ` -loop 1 -i "${backgroundPath}"`
-      
-      // 音声ファイルがある場合は入力に追加
-      if (audioPath && fs.existsSync(audioPath)) {
-        command += ` -i "${audioPath}"`
-      }
-      
-      // フィルターグラフを構築
-      let filterComplex = `[0:v]scale=${width}:${height}[bg];`
-      
-      // 字幕を追加
-      filterComplex += `[bg]ass='${assPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}':fontsdir=/System/Library/Fonts[v]`
-      
-      command += ` -filter_complex "${filterComplex}"`
-      command += ` -map "[v]"`
-      
-      // 音声マッピング
-      if (audioPath && fs.existsSync(audioPath)) {
-        command += ` -map 1:a`
-        command += ` -c:a aac -b:a 128k`
-      }
-      
-      // 動画設定
-      command += ` -c:v libx264 -preset medium -crf 23 -pix_fmt yuv420p`
-      command += ` -t ${audioDuration}`
-      command += ` "${outputPath}"`
-      
-      console.log('FFmpeg コマンド:', command)
-      
-      exec(command, { maxBuffer: 1024 * 1024 * 20 }, (error: any, stdout: any, stderr: any) => {
-        if (error) {
-          console.error('FFmpeg エラー:', error)
-          console.error('stderr:', stderr)
-          reject(error)
-        } else {
-          console.log('動画生成完了')
-          resolve(outputPath)
-        }
-      })
-    })
-    
-  } catch (error) {
-    console.error('動画生成エラー:', error)
-    throw error
-  }
-}
-
-// ASS時間フォーマット関数
-function formatASSTime(seconds: number): string {
-  const hours = Math.floor(seconds / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  const secs = Math.floor(seconds % 60)
-  const centiseconds = Math.floor((seconds % 1) * 100)
-  
-  return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}`
-}
-
 export async function POST(request: NextRequest) {
   try {
-    console.log('音声同期動画生成API開始:', new Date().toISOString())
+    console.log('AssemblyAI + Shotstack動画生成API開始:', new Date().toISOString())
     
     const body = await request.json() as VideoGenerationRequest
-    const { audioInput, settings, transcript } = body
+    const { audioInput, settings } = body
     
     if (!settings) {
       return NextResponse.json(
@@ -220,53 +294,33 @@ export async function POST(request: NextRequest) {
       exists: audioPath ? fs.existsSync(audioPath) : false
     })
     
-    // 出力ディレクトリを確保
-    const outputDir = path.join(process.cwd(), 'public', 'output')
-    if (!fs.existsSync(outputDir)) {
-      await fs.promises.mkdir(outputDir, { recursive: true })
+    if (!audioPath || !fs.existsSync(audioPath)) {
+      return NextResponse.json(
+        { error: '音声ファイルが必要です' },
+        { status: 400 }
+      )
     }
     
-    // ジョブIDと出力パスを生成
-    const jobId = `video-${Date.now()}-${Math.random().toString(36).substring(2)}`
-    const outputPath = path.join(outputDir, `${jobId}.mp4`)
+    // AssemblyAIで正確な文字起こし（タイムスタンプ付き）
+    console.log('AssemblyAIで文字起こし開始...')
+    const transcriptionResult = await transcribeWithAssemblyAI(audioPath)
     
-    // 文字起こしデータを準備
-    let processedTranscript: TranscriptSegment[] = transcript || []
-    
-    // 音声がない場合でも動画を生成
-    if (!processedTranscript.length) {
-      processedTranscript = [{
-        text: '生成された動画',
-        startTime: 0,
-        endTime: settings.duration || 60
-      }]
-    }
-    
-    console.log('処理された字幕セグメント:', processedTranscript.length, '個')
-    processedTranscript.forEach((segment, index) => {
-      console.log(`セグメント ${index + 1}: ${segment.startTime}s-${segment.endTime}s | ${segment.text}`)
+    console.log('AssemblyAI結果:', {
+      transcript: transcriptionResult.transcript.substring(0, 100) + '...',
+      segments: transcriptionResult.segments.length,
+      duration: transcriptionResult.duration
     })
     
-    console.log('動画生成開始:', outputPath)
-    
-    // 新しい音声同期動画生成を実行
-    const finalVideoPath = await generateVideoWithAudioSync({
+    // Shotstackで動画生成
+    console.log('Shotstackで動画生成開始...')
+    const videoUrl = await generateVideoWithShotstack({
       audioPath,
-      transcript: processedTranscript,
+      segments: transcriptionResult.segments,
       settings,
-      outputPath,
-      tempDir
+      duration: transcriptionResult.duration
     })
     
-    // ファイルサイズを取得
-    const stats = await fs.promises.stat(finalVideoPath)
-    const fileSize = stats.size
-    
-    console.log('動画生成完了:', {
-      path: finalVideoPath,
-      size: `${(fileSize / 1024 / 1024).toFixed(2)} MB`,
-      hasAudio: audioPath ? 'あり' : 'なし'
-    })
+    console.log('Shotstack動画生成完了:', videoUrl)
     
     // 一時ディレクトリをクリーンアップ
     try {
@@ -275,19 +329,23 @@ export async function POST(request: NextRequest) {
       console.warn('一時ディレクトリのクリーンアップに失敗:', cleanupError)
     }
     
+    const jobId = `video-${Date.now()}-${Math.random().toString(36).substring(2)}`
+    
     const result: VideoGenerationResult = {
-      videoUrl: `/output/${jobId}.mp4`,
+      videoUrl: videoUrl,
       thumbnailUrl: 'https://via.placeholder.com/1280x720/1e3a8a/ffffff?text=Generated+Video',
-      duration: processedTranscript.reduce((max, segment) => Math.max(max, segment.endTime), settings.duration || 60),
+      duration: transcriptionResult.duration,
       format: settings.format,
-      size: fileSize,
+      size: 0, // Shotstackからは取得できないため0
       jobId: jobId
     }
     
     return NextResponse.json({
       success: true,
       result,
-      message: '音声同期動画生成が完了しました'
+      message: 'AssemblyAI + Shotstack動画生成が完了しました',
+      transcript: transcriptionResult.transcript,
+      segments: transcriptionResult.segments.length
     })
     
   } catch (error: any) {
