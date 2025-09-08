@@ -271,10 +271,10 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<strin
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('AssemblyAI + Shotstack動画生成API開始:', new Date().toISOString())
+    console.log('動画生成API開始:', new Date().toISOString())
     
     const body = await request.json() as VideoGenerationRequest
-    const { audioInput, settings } = body
+    const { audioInput, settings, transcript } = body
     
     if (!settings) {
       return NextResponse.json(
@@ -287,6 +287,12 @@ export async function POST(request: NextRequest) {
     const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'video-gen-'))
     console.log('一時ディレクトリ作成:', tempDir)
     
+    let transcriptionResult: {
+      transcript: string
+      segments: TranscriptSegment[]
+      duration: number
+    }
+    
     // 音声ファイルを処理
     const audioPath = await processAudioFile(audioInput, tempDir)
     console.log('音声処理結果:', {
@@ -294,22 +300,72 @@ export async function POST(request: NextRequest) {
       exists: audioPath ? fs.existsSync(audioPath) : false
     })
     
-    if (!audioPath || !fs.existsSync(audioPath)) {
+    // 既存の文字起こし結果がある場合はそれを使用
+    if (transcript && transcript.length > 0) {
+      console.log('既存の文字起こし結果を使用:', transcript.length, '個のセグメント')
+      
+      // セグメントから総時間を計算
+      const maxEndTime = transcript.reduce((max, segment) => Math.max(max, segment.endTime), 0)
+      const duration = maxEndTime || settings.duration || 60
+      
+      transcriptionResult = {
+        transcript: transcript.map(seg => seg.text).join(' '),
+        segments: transcript,
+        duration: duration
+      }
+    } else if (audioPath && fs.existsSync(audioPath)) {
+      // 音声ファイルがある場合はAssemblyAIで文字起こし
+      console.log('AssemblyAIで文字起こし開始...')
+      transcriptionResult = await transcribeWithAssemblyAI(audioPath)
+      
+      console.log('AssemblyAI結果:', {
+        transcript: transcriptionResult.transcript.substring(0, 100) + '...',
+        segments: transcriptionResult.segments.length,
+        duration: transcriptionResult.duration
+      })
+    } else {
       return NextResponse.json(
-        { error: '音声ファイルが必要です' },
+        { error: '音声ファイルまたは文字起こし結果が必要です' },
         { status: 400 }
       )
     }
     
-    // AssemblyAIで正確な文字起こし（タイムスタンプ付き）
-    console.log('AssemblyAIで文字起こし開始...')
-    const transcriptionResult = await transcribeWithAssemblyAI(audioPath)
+    // 環境変数チェック - ShotstackとAssemblyAIのAPIキーがない場合はフォールバック
+    const SHOTSTACK_API_KEY = process.env.SHOTSTACK_API_KEY
+    const ASSEMBLY_AI_API_KEY = process.env.ASSEMBLY_AI_API_KEY
     
-    console.log('AssemblyAI結果:', {
-      transcript: transcriptionResult.transcript.substring(0, 100) + '...',
-      segments: transcriptionResult.segments.length,
-      duration: transcriptionResult.duration
-    })
+    if (!SHOTSTACK_API_KEY || !ASSEMBLY_AI_API_KEY) {
+      console.log('APIキーが設定されていないため、デモ動画を生成します')
+      
+      // デモ用の動画URL（実際のサービスでは実装が必要）
+      const demoVideoUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+      
+      const jobId = `demo-video-${Date.now()}-${Math.random().toString(36).substring(2)}`
+      
+      const result: VideoGenerationResult = {
+        videoUrl: demoVideoUrl,
+        thumbnailUrl: 'https://via.placeholder.com/1280x720/1e3a8a/ffffff?text=Demo+Video',
+        duration: transcriptionResult.duration,
+        format: settings.format,
+        size: 0,
+        jobId: jobId
+      }
+      
+      // 一時ディレクトリをクリーンアップ
+      try {
+        await fs.promises.rm(tempDir, { recursive: true, force: true })
+      } catch (cleanupError) {
+        console.warn('一時ディレクトリのクリーンアップに失敗:', cleanupError)
+      }
+      
+      return NextResponse.json({
+        success: true,
+        result,
+        message: 'デモ動画を生成しました（APIキーを設定すると実際の動画が生成されます）',
+        transcript: transcriptionResult.transcript,
+        segments: transcriptionResult.segments.length
+      })
+    }
     
     // Shotstackで動画生成
     console.log('Shotstackで動画生成開始...')
@@ -343,7 +399,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       result,
-      message: 'AssemblyAI + Shotstack動画生成が完了しました',
+      message: 'Shotstack動画生成が完了しました',
       transcript: transcriptionResult.transcript,
       segments: transcriptionResult.segments.length
     })
