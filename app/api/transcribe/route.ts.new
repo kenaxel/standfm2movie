@@ -1,0 +1,346 @@
+import { NextRequest, NextResponse } from 'next/server'
+import OpenAI from 'openai'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { execSync } from 'child_process'
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+})
+
+// 最大ファイルサイズ (5MB)
+const MAX_FILE_SIZE = 5 * 1024 * 1024
+
+// デモモード（音声の最初の30秒だけを処理）
+const DEMO_MODE = true
+const DEMO_DURATION = 30 // 秒
+
+export async function POST(request: NextRequest) {
+  try {
+    console.log(`API処理開始: ${new Date().toISOString()}`);
+    
+    // Content-Typeに基づいて処理を分岐
+    const contentType = request.headers.get('content-type') || ''
+    
+    if (contentType.includes('multipart/form-data')) {
+      // ファイルアップロードの場合
+      const formData = await request.formData()
+      const file = formData.get('file') as File
+      
+      if (!file) {
+        return NextResponse.json(
+          { error: 'ファイルが見つかりません', code: 'INVALID_FORMAT' },
+          { status: 400 }
+        )
+      }
+
+      // ファイルサイズチェック
+      if (file.size > MAX_FILE_SIZE) {
+        return NextResponse.json(
+          { error: 'ファイルサイズが大きすぎます (最大5MB)。処理速度向上のため、ファイルサイズを小さくしてください。', code: 'AUDIO_TOO_LARGE' },
+          { status: 400 }
+        )
+      }
+
+      try {
+        // ファイルをバッファに変換
+        const arrayBuffer = await file.arrayBuffer()
+        const buffer = Buffer.from(arrayBuffer)
+        
+        // ファイル名から拡張子を取得
+        const fileName = file.name || 'audio.mp3'
+        const fileExt = fileName.split('.').pop()?.toLowerCase() || 'mp3'
+        
+        // OpenAIが認識できる拡張子に変換
+        const validExt = ['flac', 'm4a', 'mp3', 'mp4', 'mpeg', 'mpga', 'oga', 'ogg', 'wav', 'webm']
+        
+        // MIMEタイプとファイル拡張子の検証
+        const mimeType = file.type
+        console.log(`ファイル情報: 名前=${fileName}, 拡張子=${fileExt}, MIMEタイプ=${mimeType}, サイズ=${file.size}バイト`)
+        
+        // MIMEタイプまたは拡張子が無効な場合はエラー
+        if (!mimeType.startsWith('audio/') && !mimeType.startsWith('video/')) {
+          return NextResponse.json(
+            { error: '無効なファイル形式です。音声ファイルをアップロードしてください。', code: 'INVALID_FORMAT' },
+            { status: 400 }
+          )
+        }
+        
+        // 拡張子が有効でない場合は適切な拡張子に変換
+        const ext = validExt.includes(fileExt) ? fileExt : 'mp3'
+        
+        // 一時ファイルパスを生成
+        const tempFilePath = path.join(os.tmpdir(), `audio-${Date.now()}.${ext}`)
+        
+        // バッファをファイルに書き込み
+        fs.writeFileSync(tempFilePath, buffer)
+        
+        // ファイル形式を確認
+        console.log(`一時ファイル作成: ${tempFilePath}`)
+        
+        // ファイルの準備
+        console.log(`ファイルの準備: ${tempFilePath}`)
+        
+        let finalFilePath = tempFilePath;
+        
+        // デモモードの場合は音声を切り詰める
+        if (DEMO_MODE) {
+          try {
+            const trimmedFilePath = path.join(os.tmpdir(), `trimmed-${Date.now()}.${ext}`);
+            console.log(`デモモード: 音声を${DEMO_DURATION}秒に切り詰めます`);
+            
+            // ffmpegがインストールされている場合は使用
+            try {
+              execSync(`ffmpeg -i "${tempFilePath}" -t ${DEMO_DURATION} -c copy "${trimmedFilePath}"`, { stdio: 'inherit' });
+              console.log(`音声ファイルを切り詰めました: ${trimmedFilePath}`);
+              finalFilePath = trimmedFilePath;
+            } catch (ffmpegError) {
+              console.error('ffmpegによる音声切り詰めに失敗しました:', ffmpegError);
+              console.log('元のファイルを使用して処理を続行します');
+            }
+          } catch (trimError) {
+            console.error('音声切り詰め処理エラー:', trimError);
+          }
+        }
+        
+        let transcription;
+        try {
+          // ファイルの存在確認
+          const fileStats = fs.statSync(finalFilePath);
+          console.log(`ファイルサイズ確認: ${fileStats.size}バイト`);
+          
+          if (fileStats.size === 0) {
+            throw new Error('ファイルサイズが0バイトです');
+          }
+          
+          console.log(`OpenAI APIリクエスト開始: ${new Date().toISOString()}`);
+          
+          // タイムアウト設定付きでAPIリクエスト
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30秒タイムアウト
+          
+          try {
+            // ファイルパスから直接ファイルを読み込む
+            const fileContent = fs.readFileSync(finalFilePath);
+            
+            transcription = await openai.audio.transcriptions.create({
+              file: {
+                content: fileContent,
+                name: path.basename(finalFilePath),
+              },
+              model: 'whisper-1',
+              language: 'ja',
+              response_format: 'text'
+            }, { signal: controller.signal });
+            
+            console.log(`OpenAI APIリクエスト完了: ${new Date().toISOString()}`);
+          } catch (error) {
+            if (error.name === 'AbortError') {
+              throw new Error('文字起こし処理がタイムアウトしました。ファイルサイズを小さくするか、後でもう一度お試しください。');
+            }
+            throw error;
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        } catch (apiError: any) {
+          console.error('OpenAI API エラー詳細:', JSON.stringify(apiError, null, 2));
+          throw apiError;
+        }
+        
+        // 一時ファイルを削除
+        try {
+          fs.unlinkSync(tempFilePath)
+          if (finalFilePath !== tempFilePath) {
+            fs.unlinkSync(finalFilePath)
+          }
+        } catch (err) {
+          console.error('一時ファイルの削除に失敗:', err)
+        }
+        
+        // デモモードの場合はメッセージを追加
+        let transcriptText = transcription;
+        if (DEMO_MODE) {
+          transcriptText = `[注意: これはデモモードでの処理結果です。音声の最初の${DEMO_DURATION}秒のみを文字起こししています] \n\n${transcription}`;
+        }
+        
+        console.log(`API処理完了: ${new Date().toISOString()}`);
+        
+        // 文字起こし結果を返す
+        return NextResponse.json({
+          transcript: transcriptText,
+          duration: DEMO_MODE ? DEMO_DURATION : 0
+        })
+      } catch (err: any) {
+        console.error('文字起こし処理エラー:', err)
+        return NextResponse.json(
+          { error: `文字起こし処理に失敗しました: ${err.message}`, code: 'TRANSCRIPTION_FAILED' },
+          { status: 500 }
+        )
+      }
+    } else {
+      // JSON形式（URL）の場合
+      const body = await request.json()
+      const audioUrl = body.audioUrl
+      
+      if (!audioUrl) {
+        return NextResponse.json(
+          { error: '音声URLが見つかりません', code: 'INVALID_FORMAT' },
+          { status: 400 }
+        )
+      }
+      
+      try {
+        // stand.fmのURLかチェック
+        if (!audioUrl.includes('stand.fm')) {
+          return NextResponse.json(
+            { error: 'stand.fmのURLのみ対応しています', code: 'INVALID_FORMAT' },
+            { status: 400 }
+          )
+        }
+        
+        // stand.fmから音声URLを取得
+        const response = await fetch(audioUrl)
+        const html = await response.text()
+        
+        // OGP metaタグから音声URLを抽出
+        const audioFileUrlMatch = html.match(/<meta property="og:audio" content="([^"]+)"/)
+        if (!audioFileUrlMatch || !audioFileUrlMatch[1]) {
+          return NextResponse.json(
+            { error: '音声ファイルが見つかりませんでした', code: 'TRANSCRIPTION_FAILED' },
+            { status: 404 }
+          )
+        }
+        
+        const audioFileUrl = audioFileUrlMatch[1]
+        
+        // 音声ファイルをダウンロード
+        const audioResponse = await fetch(audioFileUrl)
+        const arrayBuffer = await audioResponse.arrayBuffer()
+        const buffer = Buffer.from(arrayBuffer)
+        
+        // ファイルサイズチェック
+        if (buffer.length > MAX_FILE_SIZE) {
+          return NextResponse.json(
+            { error: 'ファイルサイズが大きすぎます (最大5MB)。処理速度向上のため、別のURLを試してください。', code: 'AUDIO_TOO_LARGE' },
+            { status: 400 }
+          )
+        }
+        
+        // 一時ファイルパスを生成
+        const tempFilePath = path.join(os.tmpdir(), `standfm-audio-${Date.now()}.mp3`)
+        
+        // バッファをファイルに書き込み
+        fs.writeFileSync(tempFilePath, buffer)
+        
+        // ファイル形式を確認
+        console.log(`Stand.fm 一時ファイル作成: ${tempFilePath}`)
+        
+        // ファイルの準備
+        console.log(`ファイルの準備: ${tempFilePath}`)
+        
+        let finalFilePath = tempFilePath;
+        
+        // デモモードの場合は音声を切り詰める
+        if (DEMO_MODE) {
+          try {
+            const trimmedFilePath = path.join(os.tmpdir(), `trimmed-${Date.now()}.mp3`);
+            console.log(`デモモード: 音声を${DEMO_DURATION}秒に切り詰めます`);
+            
+            // ffmpegがインストールされている場合は使用
+            try {
+              execSync(`ffmpeg -i "${tempFilePath}" -t ${DEMO_DURATION} -c copy "${trimmedFilePath}"`, { stdio: 'inherit' });
+              console.log(`音声ファイルを切り詰めました: ${trimmedFilePath}`);
+              finalFilePath = trimmedFilePath;
+            } catch (ffmpegError) {
+              console.error('ffmpegによる音声切り詰めに失敗しました:', ffmpegError);
+              console.log('元のファイルを使用して処理を続行します');
+            }
+          } catch (trimError) {
+            console.error('音声切り詰め処理エラー:', trimError);
+          }
+        }
+        
+        let transcription;
+        try {
+          // ファイルの存在確認
+          const fileStats = fs.statSync(finalFilePath);
+          console.log(`ファイルサイズ確認: ${fileStats.size}バイト`);
+          
+          if (fileStats.size === 0) {
+            throw new Error('ファイルサイズが0バイトです');
+          }
+          
+          console.log(`OpenAI APIリクエスト開始: ${new Date().toISOString()}`);
+          
+          // タイムアウト設定付きでAPIリクエスト
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000); // 30秒タイムアウト
+          
+          try {
+            // ファイルパスから直接ファイルを読み込む
+            const fileContent = fs.readFileSync(finalFilePath);
+            
+            transcription = await openai.audio.transcriptions.create({
+              file: {
+                content: fileContent,
+                name: path.basename(finalFilePath),
+              },
+              model: 'whisper-1',
+              language: 'ja',
+              response_format: 'text'
+            }, { signal: controller.signal });
+            
+            console.log(`OpenAI APIリクエスト完了: ${new Date().toISOString()}`);
+          } catch (error) {
+            if (error.name === 'AbortError') {
+              throw new Error('文字起こし処理がタイムアウトしました。ファイルサイズを小さくするか、後でもう一度お試しください。');
+            }
+            throw error;
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        } catch (apiError: any) {
+          console.error('OpenAI API エラー詳細:', JSON.stringify(apiError, null, 2));
+          throw apiError;
+        }
+        
+        // 一時ファイルを削除
+        try {
+          fs.unlinkSync(tempFilePath)
+          if (finalFilePath !== tempFilePath) {
+            fs.unlinkSync(finalFilePath)
+          }
+        } catch (err) {
+          console.error('一時ファイルの削除に失敗:', err)
+        }
+        
+        // デモモードの場合はメッセージを追加
+        let transcriptText = transcription;
+        if (DEMO_MODE) {
+          transcriptText = `[注意: これはデモモードでの処理結果です。音声の最初の${DEMO_DURATION}秒のみを文字起こししています] \n\n${transcription}`;
+        }
+        
+        console.log(`API処理完了: ${new Date().toISOString()}`);
+        
+        // 文字起こし結果を返す
+        return NextResponse.json({
+          transcript: transcriptText,
+          duration: DEMO_MODE ? DEMO_DURATION : 0
+        })
+      } catch (err: any) {
+        console.error('URL処理エラー:', err)
+        return NextResponse.json(
+          { error: `URLからの音声取得に失敗しました: ${err.message}`, code: 'TRANSCRIPTION_FAILED' },
+          { status: 500 }
+        )
+      }
+    }
+  } catch (error: any) {
+    console.error('Transcription error:', error)
+    return NextResponse.json(
+      { error: `文字起こしに失敗しました: ${error.message}`, code: 'TRANSCRIPTION_FAILED' },
+      { status: 500 }
+    )
+  }
+}
