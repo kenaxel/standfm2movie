@@ -171,7 +171,8 @@ async function generateVideoWithShotstack({
                 style: 'minimal',
                 color: '#ffffff',
                 size: 'medium',
-                background: 'rgba(0,0,0,0.8)',
+                background: '#000000',
+                opacity: 0.8,
                 position: 'bottom'
               },
               start: segment.startTime,
@@ -188,12 +189,34 @@ async function generateVideoWithShotstack({
     
     console.log('注意: 音声はローカルホストURLのため除外されました。本番環境ではクラウドストレージを使用してください。')
     
+    // Shotstackは解像度を列挙値で指定：preview|mobile|sd|hd|1080|4k
+    const mapResolution = (w?: number, h?: number): 'preview'|'mobile'|'sd'|'hd'|'1080'|'4k' => {
+      if (!w || !h) return 'hd';
+      const key = `${w}x${h}`;
+      switch (key) {
+        case '3840x2160': return '4k';
+        case '1920x1080': return '1080';
+        case '1280x720':  return 'hd';
+        case '640x480':   return 'sd';
+        case '640x360':   return 'mobile';
+        default:
+          // 近いところに丸める
+          if (w >= 3800 || h >= 2100) return '4k';
+          if (w >= 1900 || h >= 1050) return '1080';
+          if (w >= 1200 || h >= 700)  return 'hd';
+          if (w >= 640 && h >= 360)   return 'mobile';
+          return 'preview';
+      }
+    };
+
+    const resEnum = mapResolution(settings?.resolution?.width, settings?.resolution?.height);
+
     const edit = {
       timeline,
       output: {
         format: 'mp4',
-        resolution: `${settings.resolution?.width || 1280}x${settings.resolution?.height || 720}`,
-        fps: settings.fps || 30,
+        resolution: resEnum,
+        fps: settings?.fps || 30,
         quality: 'medium'
       }
     }
