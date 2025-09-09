@@ -126,16 +126,11 @@ async function generateVideoWithShotstack({
   
   try {
     console.log('Shotstackで動画生成開始...')
-    console.log('音声URL:', audioUrl ? audioUrl : 'なし')
+    console.log('音声URL:', audioUrl ? `${audioUrl} (ローカルホストのため除外)` : 'なし')
     
-    // 2. Shotstack編集データを構築（音声付き）
+    // 2. Shotstack編集データを構築（音声なし、字幕のみ）
+    // ローカルホストURLはShotstackで使用できないため、音声は一時的に除外
     const timeline = {
-      // 音声トラックを追加
-      soundtrack: audioUrl ? {
-        src: audioUrl,
-        effect: 'fadeIn',
-        volume: 1.0
-      } : undefined,
       background: '#1e3a8a',
       tracks: [
         {
@@ -171,6 +166,8 @@ async function generateVideoWithShotstack({
         }
       ]
     }
+    
+    console.log('注意: 音声はローカルホストURLのため除外されました。本番環境ではクラウドストレージを使用してください。')
     
     const edit = {
       timeline,
