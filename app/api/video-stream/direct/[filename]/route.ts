@@ -1,3 +1,5 @@
+export const runtime = 'nodejs'; // fs/Buffer系を安定動作させる
+
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -49,8 +51,9 @@ export async function GET(
       headers.set('Access-Control-Allow-Origin', '*');
       headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
       
-      // 動画ファイルを返す
-      return new NextResponse(videoBuffer, {
+      // 動画ファイルを返す（Bufferは直接NG → Uint8Array or Blobにして返す）
+      const body = new Uint8Array(videoBuffer); // これで BodyInit 扱いになる
+      return new NextResponse(body, {
         status: 200,
         headers
       });
