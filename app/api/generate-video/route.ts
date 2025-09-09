@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { VideoGenerationRequest, VideoGenerationResult, TranscriptSegment } from '@/types'
+import { VideoGenerationRequest, VideoGenerationResult, VideoAsset, TranscriptSegment } from '@/types'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+
+// ← Node APIs(fs/path/os)使うのでEdgeじゃなくNodeで動かす
+export const runtime = 'nodejs';
+// （必要なら）ビルド時に静的化されないように
+export const dynamic = 'force-dynamic';
+
+// Buffer -> ArrayBuffer 変換ユーティリティ（使用しない場合はコメントアウト）
+// const bufferToArrayBuffer = (buf: Buffer): ArrayBuffer =>
+//   buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+
+// FFmpegを使用した動画生成のためのインポート
+import ffmpeg from 'fluent-ffmpeg'
+import OpenAI from 'openai'
+import { searchVideos } from '@/lib/pexels'
+import { searchPhotos } from '@/lib/unsplash'
 
 // AssemblyAIで音声をタイムスタンプ付きで文字起こし
 async function transcribeWithAssemblyAI(audioPath: string): Promise<{
@@ -20,14 +35,18 @@ async function transcribeWithAssemblyAI(audioPath: string): Promise<{
     console.log('AssemblyAIで音声をアップロード中...')
     
     // 1. 音声ファイルをAssemblyAIにアップロード
-    const audioData = await fs.promises.readFile(audioPath)
+    const audioData = await fs.promises.readFile(audioPath) // Buffer
+    // fetchはBuffer直渡しNG。ArrayBuffer or Blobにして送る
+    const body = new Uint8Array(audioData)
+    // もしくは Blob でもOK:
+    // const body = new Blob([audioData], { type: 'application/octet-stream' });
     const uploadResponse = await fetch('https://api.assemblyai.com/v2/upload', {
       method: 'POST',
       headers: {
         'authorization': ASSEMBLY_AI_API_KEY,
         'content-type': 'application/octet-stream'
       },
-      body: audioData
+      body
     })
     
     if (!uploadResponse.ok) {
@@ -292,7 +311,11 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<{
         await fs.promises.copyFile(sourcePath, publicFilePath)
         
         // 公開URLを生成
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+        // 環境変数名の揺れ対策（APP_URL優先、なければBASE_URL、なければVercelの自動URL）
+        const baseUrl =
+          process.env.NEXT_PUBLIC_APP_URL ||
+          process.env.NEXT_PUBLIC_BASE_URL ||
+          (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
         publicUrl = `${baseUrl}/temp-audio/${publicFileName}`
         
         console.log('公開音声URL生成:', publicUrl)
@@ -328,7 +351,10 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<{
             const publicFilePath = path.join(publicDir, publicFileName)
             await fs.promises.copyFile(altPath, publicFilePath)
             
-            const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+            const baseUrl =
+              process.env.NEXT_PUBLIC_APP_URL ||
+              process.env.NEXT_PUBLIC_BASE_URL ||
+              (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
             publicUrl = `${baseUrl}/temp-audio/${publicFileName}`
             
             console.log('代替パスで音声ファイルをコピー:', audioPath)

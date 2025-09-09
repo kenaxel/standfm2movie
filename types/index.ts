@@ -67,6 +67,7 @@ export interface VideoAsset {
 }
 
 export interface VideoGenerationResult {
+  jobId?: string
   videoUrl: string
   thumbnailUrl: string
   duration: number
