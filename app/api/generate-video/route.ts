@@ -108,12 +108,12 @@ async function transcribeWithAssemblyAI(audioPath: string): Promise<{
 
 // Shotstackで動画生成
 async function generateVideoWithShotstack({
-  audioPath,
+  audioUrl,
   segments,
   settings,
   duration
 }: {
-  audioPath: string | null
+  audioUrl: string | null
   segments: TranscriptSegment[]
   settings: any
   duration: number
@@ -126,11 +126,16 @@ async function generateVideoWithShotstack({
   
   try {
     console.log('Shotstackで動画生成開始...')
-    console.log('音声ファイル:', audioPath ? 'あり（字幕のみ動画を生成）' : 'なし')
+    console.log('音声URL:', audioUrl ? audioUrl : 'なし')
     
-    // 2. Shotstack編集データを構築（音声なし、字幕のみ）
+    // 2. Shotstack編集データを構築（音声付き）
     const timeline = {
-      // 音声は一旦除外（ローカルファイルパスは使用不可のため）
+      // 音声トラックを追加
+      soundtrack: audioUrl ? {
+        src: audioUrl,
+        effect: 'fadeIn',
+        volume: 1.0
+      } : undefined,
       background: '#1e3a8a',
       tracks: [
         {
@@ -242,12 +247,16 @@ async function generateVideoWithShotstack({
   }
 }
 
-// 音声ファイルの処理関数
-async function processAudioFile(audioInput: any, tempDir: string): Promise<string | null> {
-  if (!audioInput) return null
+// 音声ファイルの処理関数（公開URL生成対応）
+async function processAudioFile(audioInput: any, tempDir: string): Promise<{
+  localPath: string | null
+  publicUrl: string | null
+}> {
+  if (!audioInput) return { localPath: null, publicUrl: null }
   
   try {
     let audioPath: string | null = null
+    let publicUrl: string | null = null
     
     if (audioInput.type === 'tempFile' && audioInput.path) {
       // パスの正規化 - 複数のパターンに対応
@@ -270,15 +279,32 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<strin
       console.log('音声ファイル検索パス:', sourcePath)
       
       if (fs.existsSync(sourcePath)) {
+        // 一時ディレクトリにコピー
         audioPath = path.join(tempDir, `audio_${Date.now()}.mp3`)
         await fs.promises.copyFile(sourcePath, audioPath)
         console.log('音声ファイルをコピー:', audioPath)
+        
+        // 公開ディレクトリにもコピーして公開URLを生成
+        const publicDir = path.join(process.cwd(), 'public', 'temp-audio')
+        if (!fs.existsSync(publicDir)) {
+          await fs.promises.mkdir(publicDir, { recursive: true })
+        }
+        
+        const publicFileName = `audio_${Date.now()}_${Math.random().toString(36).substring(2)}.mp3`
+        const publicFilePath = path.join(publicDir, publicFileName)
+        await fs.promises.copyFile(sourcePath, publicFilePath)
+        
+        // 公開URLを生成
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+        publicUrl = `${baseUrl}/temp-audio/${publicFileName}`
+        
+        console.log('公開音声URL生成:', publicUrl)
         
         // ファイルサイズを確認
         const stats = await fs.promises.stat(audioPath)
         console.log('コピーされた音声ファイルサイズ:', stats.size, 'bytes')
         
-        return audioPath
+        return { localPath: audioPath, publicUrl }
       } else {
         console.error('音声ファイルが見つかりません:', sourcePath)
         
@@ -294,19 +320,34 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<strin
           if (fs.existsSync(altPath)) {
             audioPath = path.join(tempDir, `audio_${Date.now()}.mp3`)
             await fs.promises.copyFile(altPath, audioPath)
+            
+            // 公開ディレクトリにもコピー
+            const publicDir = path.join(process.cwd(), 'public', 'temp-audio')
+            if (!fs.existsSync(publicDir)) {
+              await fs.promises.mkdir(publicDir, { recursive: true })
+            }
+            
+            const publicFileName = `audio_${Date.now()}_${Math.random().toString(36).substring(2)}.mp3`
+            const publicFilePath = path.join(publicDir, publicFileName)
+            await fs.promises.copyFile(altPath, publicFilePath)
+            
+            const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+            publicUrl = `${baseUrl}/temp-audio/${publicFileName}`
+            
             console.log('代替パスで音声ファイルをコピー:', audioPath)
-            return audioPath
+            console.log('公開音声URL生成:', publicUrl)
+            return { localPath: audioPath, publicUrl }
           }
         }
         
-        return null
+        return { localPath: null, publicUrl: null }
       }
     }
     
-    return audioPath
+    return { localPath: audioPath, publicUrl }
   } catch (error) {
     console.error('音声処理エラー:', error)
-    return null
+    return { localPath: null, publicUrl: null }
   }
 }
 
@@ -335,10 +376,11 @@ export async function POST(request: NextRequest) {
     }
     
     // 音声ファイルを処理
-    const audioPath = await processAudioFile(audioInput, tempDir)
+    const audioResult = await processAudioFile(audioInput, tempDir)
     console.log('音声処理結果:', {
-      audioPath,
-      exists: audioPath ? fs.existsSync(audioPath) : false
+      localPath: audioResult.localPath,
+      publicUrl: audioResult.publicUrl,
+      exists: audioResult.localPath ? fs.existsSync(audioResult.localPath) : false
     })
     
     // 既存の文字起こし結果がある場合はそれを使用
@@ -354,10 +396,10 @@ export async function POST(request: NextRequest) {
         segments: transcript,
         duration: duration
       }
-    } else if (audioPath && fs.existsSync(audioPath)) {
+    } else if (audioResult.localPath && fs.existsSync(audioResult.localPath)) {
       // 音声ファイルがある場合はAssemblyAIで文字起こし
       console.log('AssemblyAIで文字起こし開始...')
-      transcriptionResult = await transcribeWithAssemblyAI(audioPath)
+      transcriptionResult = await transcribeWithAssemblyAI(audioResult.localPath)
       
       console.log('AssemblyAI結果:', {
         transcript: transcriptionResult.transcript.substring(0, 100) + '...',
@@ -411,7 +453,7 @@ export async function POST(request: NextRequest) {
     // Shotstackで動画生成
     console.log('Shotstackで動画生成開始...')
     const videoUrl = await generateVideoWithShotstack({
-      audioPath,
+      audioUrl: audioResult.publicUrl,
       segments: transcriptionResult.segments,
       settings,
       duration: transcriptionResult.duration
