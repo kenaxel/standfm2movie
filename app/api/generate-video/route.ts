@@ -126,21 +126,11 @@ async function generateVideoWithShotstack({
   
   try {
     console.log('Shotstackで動画生成開始...')
+    console.log('音声ファイル:', audioPath ? 'あり（字幕のみ動画を生成）' : 'なし')
     
-    // 1. 音声ファイルをアップロード（必要に応じて）
-    let audioUrl = null
-    if (audioPath && fs.existsSync(audioPath)) {
-      // 実際の実装では音声ファイルをクラウドストレージにアップロード
-      // ここではローカルファイルパスを使用（デモ用）
-      audioUrl = audioPath
-    }
-    
-    // 2. Shotstack編集データを構築
+    // 2. Shotstack編集データを構築（音声なし、字幕のみ）
     const timeline = {
-      soundtrack: audioUrl ? {
-        src: audioUrl,
-        effect: 'fadeIn'
-      } : null,
+      // 音声は一旦除外（ローカルファイルパスは使用不可のため）
       background: '#1e3a8a',
       tracks: [
         {
@@ -149,7 +139,7 @@ async function generateVideoWithShotstack({
             {
               asset: {
                 type: 'html',
-                html: `<div style="width:100%;height:100%;background:linear-gradient(135deg,#1e3a8a,#3730a3);"></div>`
+                html: `<div style="width:100%;height:100%;background:linear-gradient(135deg,#1e3a8a,#3730a3);display:flex;align-items:center;justify-content:center;"><div style="color:white;font-size:48px;text-align:center;font-family:Arial,sans-serif;">音声から生成された動画</div></div>`
               },
               start: 0,
               length: duration
@@ -162,7 +152,7 @@ async function generateVideoWithShotstack({
                 style: 'minimal',
                 color: '#ffffff',
                 size: 'medium',
-                background: 'rgba(0,0,0,0.7)',
+                background: 'rgba(0,0,0,0.8)',
                 position: 'bottom'
               },
               start: segment.startTime,
@@ -186,6 +176,8 @@ async function generateVideoWithShotstack({
         quality: 'medium'
       }
     }
+    
+    console.log('Shotstack編集データ:', JSON.stringify(edit, null, 2))
     
     // 3. レンダリングを開始
     console.log('Shotstack APIキー確認:', SHOTSTACK_API_KEY ? 'あり' : 'なし')
