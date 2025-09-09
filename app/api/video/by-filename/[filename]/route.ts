@@ -1,3 +1,5 @@
+export const runtime = 'nodejs'; // Buffer/fs processing requires Node runtime
+
 import { NextRequest, NextResponse } from 'next/server'
 import fs from 'fs'
 import path from 'path'
@@ -81,7 +83,8 @@ export async function GET(
     headers.set('Expires', '0')
     headers.set('Accept-Ranges', 'bytes') // 動画のシークをサポート
     
-    return new NextResponse(fileBuffer, {
+    const body = new Uint8Array(fileBuffer)
+    return new NextResponse(body, {
       status: 200,
       headers
     })

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import fs from 'fs'
 import path from 'path'
 
+export const runtime = 'nodejs'
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { filename: string } }
@@ -101,13 +103,15 @@ export async function GET(
       headers.set('Content-Range', `bytes ${start}-${end}/${fileSize}`)
       headers.set('Content-Length', chunksize.toString())
       
-      return new NextResponse(chunk, {
+      const chunkBody = new Uint8Array(chunk)
+      return new NextResponse(chunkBody, {
         status: 206,
         headers
       })
     }
     
-    return new NextResponse(fileBuffer, {
+    const body = new Uint8Array(fileBuffer)
+    return new NextResponse(body, {
       status: 200,
       headers
     })

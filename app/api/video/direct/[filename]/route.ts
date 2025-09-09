@@ -1,3 +1,5 @@
+export const runtime = 'nodejs'; // Buffer/fs 使うので Node で
+
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -60,8 +62,9 @@ export async function GET(
       headers.set('Pragma', 'no-cache');
       headers.set('Expires', '0');
       
-      // 部分的なコンテンツを返す
-      return new NextResponse(buffer, {
+      // 部分的なコンテンツを返す（Buffer直渡しNG → Uint8Array/Blobにする）
+      const body = new Uint8Array(buffer); // ← これで BodyInit 扱い
+      return new NextResponse(body, {
         status: 206,
         headers
       });
@@ -82,8 +85,9 @@ export async function GET(
       headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
       headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
       
-      // 動画ファイルを返す
-      return new NextResponse(videoBuffer, {
+      // 動画ファイルを返す（Buffer直渡しNG → Uint8Array/Blobにする）
+      const body = new Uint8Array(videoBuffer); // ← これで BodyInit 扱い
+      return new NextResponse(body, {
         status: 200,
         headers
       });
