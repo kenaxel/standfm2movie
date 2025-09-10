@@ -3,6 +3,7 @@ import { VideoGenerationRequest, VideoGenerationResult, VideoAsset, TranscriptSe
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { createSupabaseServerClient } from '@/lib/supabase'
 
 // ← Node APIs(fs/path/os)使うのでEdgeじゃなくNodeで動かす
 export const runtime = 'nodejs';
@@ -172,11 +173,11 @@ async function generateVideoWithShotstack({
                 color: '#ffffff',
                 size: 'medium',
                 background: '#000000',
-                opacity: 0.8,
                 position: 'bottom'
               },
               start: segment.startTime,
               length: segment.endTime - segment.startTime,
+              opacity: 0.8,
               transition: {
                 in: 'fade',
                 out: 'fade'
@@ -429,6 +430,35 @@ export async function POST(request: NextRequest) {
       exists: audioResult.localPath ? fs.existsSync(audioResult.localPath) : false
     })
     
+    // Supabaseストレージへのアップロード処理
+    let audioPublicUrl = audioResult.publicUrl // 既に外部公開URLがあればそのまま
+    const supabase = createSupabaseServerClient()
+    
+    // ローカルしか無い＆Supabase使えるならアップロードして公開URLにする
+    if (!audioPublicUrl && audioResult.localPath && supabase) {
+      try {
+        const buf = await fs.promises.readFile(audioResult.localPath)
+        const fileName = `audio/${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`
+        const { error: upErr } = await supabase
+          .storage
+          .from('media')              // ← 事前に作ったバケット名
+          .upload(fileName, buf, {
+            contentType: 'audio/mpeg',
+            upsert: true
+          })
+    
+        if (upErr) {
+          console.warn('Supabaseアップロード失敗:', upErr.message)
+        } else {
+          const { data: pub } = supabase.storage.from('media').getPublicUrl(fileName)
+          audioPublicUrl = pub?.publicUrl || null
+          console.log('Supabase公開URL:', audioPublicUrl)
+        }
+      } catch (e) {
+        console.warn('Supabaseアップロード中にエラー:', e)
+      }
+    }
+    
     // 既存の文字起こし結果がある場合はそれを使用
     if (transcript && transcript.length > 0) {
       console.log('既存の文字起こし結果を使用:', transcript.length, '個のセグメント')
@@ -499,7 +529,7 @@ export async function POST(request: NextRequest) {
     // Shotstackで動画生成
     console.log('Shotstackで動画生成開始...')
     const videoUrl = await generateVideoWithShotstack({
-      audioUrl: audioResult.publicUrl,
+      audioUrl: audioPublicUrl,
       segments: transcriptionResult.segments,
       settings,
       duration: transcriptionResult.duration

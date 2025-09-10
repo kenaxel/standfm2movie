@@ -13,6 +13,7 @@
     "@remotion/cli": "^4.0.341",
     "@remotion/player": "^4.0.341",
     "@remotion/renderer": "^4.0.341",
+    "@supabase/supabase-js": "^2.57.4",
     "@swc/core": "^1.13.5",
     "@types/fluent-ffmpeg": "^2.1.27",
     "autoprefixer": "^10.4.14",

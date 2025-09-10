@@ -109,6 +109,62 @@ export interface AssetSearchResult {
   duration?: number
 }
 
+// Supabase関連の型定義
+export interface User {
+  id: string
+  email: string
+  created_at: string
+  updated_at: string
+}
+
+export interface VideoProject {
+  id: string
+  user_id: string
+  title: string
+  description?: string
+  audio_url?: string
+  video_url?: string
+  thumbnail_url?: string
+  settings: VideoSettings
+  transcript?: TranscriptSegment[]
+  status: 'draft' | 'processing' | 'completed' | 'failed'
+  created_at: string
+  updated_at: string
+}
+
+export interface UserUsage {
+  id: string
+  user_id: string
+  videos_generated: number
+  total_duration: number
+  api_calls: number
+  last_reset: string
+  created_at: string
+  updated_at: string
+}
+
+export interface Database {
+  public: {
+    Tables: {
+      users: {
+        Row: User
+        Insert: Omit<User, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<User, 'id' | 'created_at' | 'updated_at'>>
+      }
+      video_projects: {
+        Row: VideoProject
+        Insert: Omit<VideoProject, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<VideoProject, 'id' | 'created_at' | 'updated_at'>>
+      }
+      user_usage: {
+        Row: UserUsage
+        Insert: Omit<UserUsage, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<UserUsage, 'id' | 'created_at' | 'updated_at'>>
+      }
+    }
+  }
+}
+
 
 
 

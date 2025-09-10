@@ -39,3 +39,8 @@ next-env.d.ts
 
 
 .aider*
+
+public/temp-audio/
+public/audio/
+tmp/
+*.mp3
