@@ -495,14 +495,30 @@ export async function POST(request: NextRequest) {
     // 音声ファイルを処理（エラー処理を強化）
     let audioResult;
     try {
+      // tmpディレクトリの存在確認と作成
+      try {
+        await fs.promises.access('/tmp')
+      } catch {
+        await fs.promises.mkdir('/tmp', { recursive: true })
+      }
+
       audioResult = await processAudioFile(audioInput as any, tempDir)
       console.log('音声処理結果:', {
         localPath: audioResult.localPath,
         publicUrl: audioResult.publicUrl,
-        exists: audioResult.localPath ? await fs.promises.access(audioResult.localPath).then(() => true).catch(() => false) : false
+        exists: audioResult.localPath ? 
+          await fs.promises.access(audioResult.localPath)
+            .then(() => true)
+            .catch(() => {
+              console.warn('ファイルアクセスエラー:', audioResult.localPath);
+              return false;
+            }) : false
       })
     } catch (error) {
       console.error('音声ファイル処理中にエラー:', error)
+      if (error instanceof Error) {
+        console.error('エラー詳細:', error.stack)
+      }
       audioResult = { localPath: null, publicUrl: null }
     }
     
