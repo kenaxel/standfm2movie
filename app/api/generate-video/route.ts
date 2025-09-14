@@ -441,9 +441,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 一時ディレクトリを作成
-    const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'video-gen-'))
-    console.log('一時ディレクトリ作成:', tempDir)
+    // Vercelの読み取り専用ファイルシステム対策
+    const tempDir = '/tmp'
+    console.log('一時ディレクトリ使用:', tempDir)
     
     let transcriptionResult: {
       transcript: string
@@ -596,11 +596,20 @@ export async function POST(request: NextRequest) {
       throw error
     }
     
-    // 一時ディレクトリをクリーンアップ
+    // 一時ファイルをクリーンアップ
     try {
-      await fs.promises.rm(tempDir, { recursive: true, force: true })
+      const files = await fs.promises.readdir('/tmp')
+      for (const file of files) {
+        if (file.startsWith('audio_') || file.startsWith('video_')) {
+          try {
+            await fs.promises.unlink(path.join('/tmp', file))
+          } catch (e) {
+            console.warn('一時ファイルの削除に失敗:', file, e)
+          }
+        }
+      }
     } catch (cleanupError) {
-      console.warn('一時ディレクトリのクリーンアップに失敗:', cleanupError)
+      console.warn('一時ファイルのクリーンアップに失敗:', cleanupError)
     }
     
     const jobId = `video-${Date.now()}-${Math.random().toString(36).substring(2)}`
