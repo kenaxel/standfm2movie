@@ -643,20 +643,23 @@ export async function POST(request: NextRequest) {
       throw error
     }
     
-    // 一時ファイルをクリーンアップ
+    // 一時ファイルのクリーンアップ（エラー処理を強化）
     try {
-      const files = await fs.promises.readdir('/tmp')
+      const files = await fs.promises.readdir('/tmp').catch(e => {
+        console.warn('/tmpの読み取りに失敗:', e)
+        return []
+      })
+      
       for (const file of files) {
         if (file.startsWith('audio_') || file.startsWith('video_')) {
-          try {
-            await fs.promises.unlink(path.join('/tmp', file))
-          } catch (e) {
-            console.warn('一時ファイルの削除に失敗:', file, e)
-          }
+          await fs.promises.unlink(path.join('/tmp', file)).catch(e => {
+            console.warn(`ファイル ${file} の削除に失敗:`, e)
+          })
         }
       }
-    } catch (cleanupError) {
-      console.warn('一時ファイルのクリーンアップに失敗:', cleanupError)
+    } catch (error) {
+      console.warn('一時ファイルのクリーンアップ中にエラー:', error)
+      // クリーンアップの失敗は致命的ではないので続行
     }
     
     const jobId = `video-${Date.now()}-${Math.random().toString(36).substring(2)}`
