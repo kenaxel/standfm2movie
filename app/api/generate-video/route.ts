@@ -493,7 +493,7 @@ export async function POST(request: NextRequest) {
     }
     
     // 音声ファイルを処理（エラー処理を強化）
-    let audioResult;
+    let audioResult: { localPath: string | null; publicUrl: string | null };
     try {
       // tmpディレクトリの存在確認と作成
       try {
