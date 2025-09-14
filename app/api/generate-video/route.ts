@@ -304,22 +304,29 @@ type LocalAudioInput =
   | { type: 'url'; url: string }    // ← 追加
   | null;
 
-// 音声ファイルの処理関数（公開URL生成対応）
-async function processAudioFile(audioInput: LocalAudioInput, tempDir: string): Promise<{
-  localPath: string | null
-  publicUrl: string | null
-}> {
-  if (!audioInput) return { localPath: null, publicUrl: null }
-  
-  try {
-    let audioPath: string | null = null
-    let publicUrl: string | null = null
-    
-    // URL直指定の場合は、そのURLを公開URLとして返す
-    if (audioInput.type === 'url') {
-      return { localPath: null, publicUrl: audioInput.url }
-    }
-    
+// 音声ファイルの処理関数（公開URL生成対応） 
+async function processAudioFile(audioInput: LocalAudioInput, tempDir: string): Promise<{ 
+  localPath: string | null 
+  publicUrl: string | null 
+}> { 
+  if (!audioInput) return { localPath: null, publicUrl: null } 
+
+  try { 
+    // ① URL で渡ってきた場合は、そのまま使う 
+    if (audioInput.type === 'url' && typeof audioInput.url === 'string') { 
+      const url = audioInput.url.trim() 
+      if (!/^https?:\/\//i.test(url)) { 
+        throw new Error('音声URLが不正です（http/https が必要）') 
+      } 
+      // ここで軽く拡張子だけチェック（任意） 
+      // if (!/\.(mp3|m4a|mp4|wav|ogg|webm)(\?|$)/i.test(url)) { ... } 
+
+      return { localPath: null, publicUrl: url } 
+    } 
+
+    // ② ここから先は tempFile 等の既存処理（既存コードをそのまま） 
+    let audioPath: string | null = null 
+    let publicUrl: string | null = null 
     if (audioInput.type === 'tempFile' && audioInput.path) {
       // パスの正規化 - 複数のパターンに対応
       let sourcePath: string
