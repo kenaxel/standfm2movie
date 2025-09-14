@@ -577,8 +577,9 @@ export async function POST(request: NextRequest) {
       settings: JSON.stringify(settings)
     })
 
+    let videoUrl: string;
     try {
-      const videoUrl = await generateVideoWithShotstack({
+      videoUrl = await generateVideoWithShotstack({
         audioUrl: audioPublicUrl,
         segments: transcriptionResult.segments,
         settings,
