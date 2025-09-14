@@ -148,49 +148,90 @@ async function generateVideoWithShotstack({
     console.log('Shotstackで動画生成開始...')
     console.log('音声URL:', audioUrl ? `${audioUrl} (ローカルホストのため除外)` : 'なし')
     
-    // === ここからタイムライン作成 === 
-    const clips: any[] = []; 
+    // タイムライン作成
+    const clips: any[] = [];
     
-    // 背景（1本のHTMLクリップ） 
-    clips.push({ 
-      asset: { 
-        type: 'html', 
-        html: 
-          '<div style="width:100%;height:100%;background:linear-gradient(135deg,#1e3a8a,#3730a3);' + 
-          'display:flex;align-items:center;justify-content:center;">' + 
-          '<div style="color:white;font-size:42px;text-align:center;font-family:Arial,sans-serif;">' + 
-          '音声から生成された動画' + 
-          '</div></div>', 
-      }, 
-      start: 0, 
-      length: duration, 
-    }); 
+    // 背景クリップ
+    const backgroundColor = settings.backgroundColor || 'linear-gradient(135deg,#1e3a8a,#3730a3)';
+    const fontSize = settings.fontSize || '42px';
+    const fontFamily = settings.fontFamily || 'Arial,sans-serif';
     
-    // ★ 音声クリップ（公開URLが必須：ローカルや http は不可） 
-    if (audioUrl) { 
-      clips.push({ 
-        asset: { type: 'audio', src: audioUrl, volume: 1 }, // ← Supabase の https URL 
-        start: 0, 
-      }); 
-    } 
-    
-    // ★ 字幕クリップ（セグメントをテロップに） 
-    for (const seg of segments) { 
-      const len = Math.max(0.6, (seg.endTime ?? seg.startTime + 1) - seg.startTime); 
-      clips.push({ 
-        asset: { 
-          type: 'title', 
-          text: seg.text, 
-          style: 'minimal',          // 背景色は未指定（rgba/opacity はNG） 
-          color: '#ffffff', 
-          size: 'small', 
-        }, 
-        start: seg.startTime, 
-        length: len, 
-        position: 'bottom', 
-        transition: { in: 'fade', out: 'fade' }, 
-      }); 
-    } 
+    clips.push({
+      asset: {
+        type: 'html',
+        html: `
+          <div style="
+            width:100%;
+            height:100%;
+            background:${backgroundColor};
+            display:flex;
+            align-items:center;
+            justify-content:center;
+          ">
+            <div style="
+              color:white;
+              font-size:${fontSize};
+              text-align:center;
+              font-family:${fontFamily};
+            ">
+              ${settings.title || '音声から生成された動画'}
+            </div>
+          </div>
+        `.replace(/\s+/g, ' ').trim()
+      },
+      start: 0,
+      length: duration
+    });
+
+    // 音声クリップ
+    if (audioUrl && audioUrl.startsWith('https://')) {
+      clips.push({
+        asset: {
+          type: 'audio',
+          src: audioUrl,
+          volume: settings.audioVolume || 1,
+          trim: settings.audioTrim || 0
+        },
+        start: 0,
+        length: duration
+      });
+    }
+
+    // 字幕クリップ
+    const captionStyle = settings.captionStyle || {
+      position: 'bottom',
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      color: '#ffffff',
+      fontSize: '24px',
+      fontFamily: 'Arial',
+      fontWeight: 'normal',
+      padding: '0.5em',
+      borderRadius: '4px'
+    };
+
+    for (const seg of segments) {
+      const len = Math.max(0.6, (seg.endTime ?? seg.startTime + 1) - seg.startTime);
+      clips.push({
+        asset: {
+          type: 'title',
+          text: seg.text,
+          style: 'custom',
+          background: captionStyle.backgroundColor,
+          color: captionStyle.color,
+          size: captionStyle.fontSize,
+          font: captionStyle.fontFamily,
+          weight: captionStyle.fontWeight
+        },
+        start: seg.startTime,
+        length: len,
+        position: captionStyle.position,
+        offset: {
+          y: captionStyle.position === 'bottom' ? -60 : 
+             captionStyle.position === 'top' ? 60 : 0
+        },
+        transition: { in: 'fade', out: 'fade' }
+      });
+    }
     
     const timeline = { 
       background: '#1e3a8a', 
