@@ -492,13 +492,19 @@ export async function POST(request: NextRequest) {
       duration: number
     }
     
-    // 音声ファイルを処理
-    const audioResult = await processAudioFile(audioInput as any, tempDir)
-    console.log('音声処理結果:', {
-      localPath: audioResult.localPath,
-      publicUrl: audioResult.publicUrl,
-      exists: audioResult.localPath ? fs.existsSync(audioResult.localPath) : false
-    })
+    // 音声ファイルを処理（エラー処理を強化）
+    let audioResult;
+    try {
+      audioResult = await processAudioFile(audioInput as any, tempDir)
+      console.log('音声処理結果:', {
+        localPath: audioResult.localPath,
+        publicUrl: audioResult.publicUrl,
+        exists: audioResult.localPath ? await fs.promises.access(audioResult.localPath).then(() => true).catch(() => false) : false
+      })
+    } catch (error) {
+      console.error('音声ファイル処理中にエラー:', error)
+      audioResult = { localPath: null, publicUrl: null }
+    }
     
     // URL直指定の場合の検証
     let audioPublicUrl = null
