@@ -459,11 +459,20 @@ export async function POST(request: NextRequest) {
       exists: audioResult.localPath ? fs.existsSync(audioResult.localPath) : false
     })
     
-    // URL 直指定のときはそれを使う
-     let audioPublicUrl = 
-       (audioInput && (audioInput as any).type === 'url' 
-         ? (audioInput as any).url 
-         : audioResult.publicUrl) || null;
+    // URL直指定の場合の検証
+    let audioPublicUrl = null
+    if (audioInput && (audioInput as any).type === 'url') {
+      const inputUrl = (audioInput as any).url
+      if (!inputUrl.startsWith('https://')) {
+        console.warn('音声URLがhttpsではありません:', inputUrl)
+        throw new Error('音声URLはhttpsで始まる必要があります')
+      }
+      audioPublicUrl = inputUrl
+    } else {
+      audioPublicUrl = audioResult.publicUrl
+    }
+
+    console.log('使用する音声URL:', audioPublicUrl)
      
      // Supabaseストレージへのアップロード処理（URL直指定でない場合のみ）
     const supabase = createSupabaseServerClient()
@@ -561,15 +570,30 @@ export async function POST(request: NextRequest) {
     }
     
     // Shotstackで動画生成
-    console.log('Shotstackで動画生成開始...')
-    const videoUrl = await generateVideoWithShotstack({
+    console.log('Shotstack生成開始 - パラメータ:', {
       audioUrl: audioPublicUrl,
-      segments: transcriptionResult.segments,
-      settings,
-      duration: transcriptionResult.duration
+      segmentsCount: transcriptionResult.segments.length,
+      duration: transcriptionResult.duration,
+      settings: JSON.stringify(settings)
     })
-    
-    console.log('Shotstack動画生成完了:', videoUrl)
+
+    try {
+      const videoUrl = await generateVideoWithShotstack({
+        audioUrl: audioPublicUrl,
+        segments: transcriptionResult.segments,
+        settings,
+        duration: transcriptionResult.duration
+      })
+      
+      console.log('Shotstack生成完了:', videoUrl)
+    } catch (error: any) {
+      console.error('Shotstack生成エラー詳細:', {
+        message: error.message,
+        stack: error.stack,
+        response: error.response?.data
+      })
+      throw error
+    }
     
     // 一時ディレクトリをクリーンアップ
     try {
