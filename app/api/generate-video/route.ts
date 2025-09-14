@@ -148,45 +148,54 @@ async function generateVideoWithShotstack({
     console.log('Shotstackで動画生成開始...')
     console.log('音声URL:', audioUrl ? `${audioUrl} (ローカルホストのため除外)` : 'なし')
     
-    // 2. Shotstack編集データを構築（音声なし、字幕のみ）
-    // ローカルホストURLはShotstackで使用できないため、音声は一時的に除外
-    const timeline = {
-      background: '#1e3a8a',
-      tracks: [
-        {
-          clips: [
-            // 背景クリップ
-            {
-              asset: {
-                type: 'html',
-                html: `<div style="width:100%;height:100%;background:linear-gradient(135deg,#1e3a8a,#3730a3);display:flex;align-items:center;justify-content:center;"><div style="color:white;font-size:48px;text-align:center;font-family:Arial,sans-serif;">音声から生成された動画</div></div>`
-              },
-              start: 0,
-              length: duration
-            },
-            // 字幕クリップ
-            ...segments.map((segment, index) => ({
-              asset: {
-                type: 'title',
-                text: segment.text,
-                style: 'minimal',
-                color: '#ffffff',
-                size: 'medium',
-                background: '#000000',
-                position: 'bottom'
-              },
-              start: segment.startTime,
-              length: segment.endTime - segment.startTime,
-              opacity: 0.8,
-              transition: {
-                in: 'fade',
-                out: 'fade'
-              }
-            }))
-          ]
-        }
-      ]
-    }
+    // === ここからタイムライン作成 === 
+    const clips: any[] = []; 
+    
+    // 背景（1本のHTMLクリップ） 
+    clips.push({ 
+      asset: { 
+        type: 'html', 
+        html: 
+          '<div style="width:100%;height:100%;background:linear-gradient(135deg,#1e3a8a,#3730a3);' + 
+          'display:flex;align-items:center;justify-content:center;">' + 
+          '<div style="color:white;font-size:42px;text-align:center;font-family:Arial,sans-serif;">' + 
+          '音声から生成された動画' + 
+          '</div></div>', 
+      }, 
+      start: 0, 
+      length: duration, 
+    }); 
+    
+    // ★ 音声クリップ（公開URLが必須：ローカルや http は不可） 
+    if (audioUrl) { 
+      clips.push({ 
+        asset: { type: 'audio', src: audioUrl, volume: 1 }, // ← Supabase の https URL 
+        start: 0, 
+      }); 
+    } 
+    
+    // ★ 字幕クリップ（セグメントをテロップに） 
+    for (const seg of segments) { 
+      const len = Math.max(0.6, (seg.endTime ?? seg.startTime + 1) - seg.startTime); 
+      clips.push({ 
+        asset: { 
+          type: 'title', 
+          text: seg.text, 
+          style: 'minimal',          // 背景色は未指定（rgba/opacity はNG） 
+          color: '#ffffff', 
+          size: 'small', 
+        }, 
+        start: seg.startTime, 
+        length: len, 
+        position: 'bottom', 
+        transition: { in: 'fade', out: 'fade' }, 
+      }); 
+    } 
+    
+    const timeline = { 
+      background: '#1e3a8a', 
+      tracks: [{ clips }], 
+    };
     
     console.log('注意: 音声はローカルホストURLのため除外されました。本番環境ではクラウドストレージを使用してください。')
     
@@ -212,15 +221,17 @@ async function generateVideoWithShotstack({
 
     const resEnum = mapResolution(settings?.resolution?.width, settings?.resolution?.height);
 
-    const edit = {
-      timeline,
-      output: {
-        format: 'mp4',
-        resolution: resEnum,
-        fps: settings?.fps || 30,
-        quality: 'medium'
-      }
-    }
+    // Shotstack の出力指定（解像度は列挙値: preview|mobile|sd|hd|1080|4k） 
+    const edit = { 
+      timeline, 
+      output: { 
+        format: 'mp4', 
+        resolution: 'hd',               // ← '1280x720' ではなく列挙値を使う 
+        fps: settings?.fps || 30, 
+        quality: 'medium', 
+      }, 
+    };
+    // === ここまでタイムライン作成 ===
     
     console.log('Shotstack編集データ:', JSON.stringify(edit, null, 2))
     
@@ -287,8 +298,14 @@ async function generateVideoWithShotstack({
   }
 }
 
+// 受け取り: audioInput に { type: "url", url: "https://..." } も許可
+type LocalAudioInput = 
+  | { type: 'tempFile'; path: string }
+  | { type: 'url'; url: string }    // ← 追加
+  | null;
+
 // 音声ファイルの処理関数（公開URL生成対応）
-async function processAudioFile(audioInput: any, tempDir: string): Promise<{
+async function processAudioFile(audioInput: LocalAudioInput, tempDir: string): Promise<{
   localPath: string | null
   publicUrl: string | null
 }> {
@@ -297,6 +314,11 @@ async function processAudioFile(audioInput: any, tempDir: string): Promise<{
   try {
     let audioPath: string | null = null
     let publicUrl: string | null = null
+    
+    // URL直指定の場合は、そのURLを公開URLとして返す
+    if (audioInput.type === 'url') {
+      return { localPath: null, publicUrl: audioInput.url }
+    }
     
     if (audioInput.type === 'tempFile' && audioInput.path) {
       // パスの正規化 - 複数のパターンに対応
@@ -423,19 +445,24 @@ export async function POST(request: NextRequest) {
     }
     
     // 音声ファイルを処理
-    const audioResult = await processAudioFile(audioInput, tempDir)
+    const audioResult = await processAudioFile(audioInput as any, tempDir)
     console.log('音声処理結果:', {
       localPath: audioResult.localPath,
       publicUrl: audioResult.publicUrl,
       exists: audioResult.localPath ? fs.existsSync(audioResult.localPath) : false
     })
     
-    // Supabaseストレージへのアップロード処理
-    let audioPublicUrl = audioResult.publicUrl // 既に外部公開URLがあればそのまま
+    // URL 直指定のときはそれを使う
+     let audioPublicUrl = 
+       (audioInput && (audioInput as any).type === 'url' 
+         ? (audioInput as any).url 
+         : audioResult.publicUrl) || null;
+     
+     // Supabaseストレージへのアップロード処理（URL直指定でない場合のみ）
     const supabase = createSupabaseServerClient()
     
     // ローカルしか無い＆Supabase使えるならアップロードして公開URLにする
-    if (!audioPublicUrl && audioResult.localPath && supabase) {
+     if (!audioPublicUrl && audioResult.localPath && supabase) {
       try {
         const buf = await fs.promises.readFile(audioResult.localPath)
         const fileName = `audio/${Date.now()}_${Math.random().toString(36).slice(2)}.mp3`
